@@ -1725,7 +1725,7 @@ impl<T> AbsTree<T>{
                 Self::lemma_remove_node_commut()
             }
             crate::fold::lemma_fold_left_permutation_with_inv(
-                des1.to_seq(), seq, f, self, inv
+                des1.to_seq(), seq, f, self, inv, |x:usize|true
             )
         }
 
