@@ -1890,11 +1890,13 @@ impl<T> IndexTree<T>{
     #[verifier::external_body]
     pub fn remove_one_edge(&mut self, parent:usize, child:usize)
         requires
-            old(self)@.is_parent_of(parent, child)
+            old(self)@.is_parent_of(parent, child),
+            // old(self)@.nodes[parent].child[0] == child,
         ensures
             self@ =~= old(self)@.remove_one_edge(parent, child)
     {
-        unimplemented!() //todo
+        self.nodes.get_mut(&parent).unwrap().child.remove(0);
+        // unimplemented!() //todo
     }
 }
 
@@ -1903,7 +1905,7 @@ impl<T> IndexTree<T>{
 
 impl<T> IndexTree<T>{
 
-
+    // not efficient
     #[verifier::exec_allows_no_decreases_clause]
     #[verifier::loop_isolation(false)]
     pub fn revoke(&mut self, id:usize)
@@ -1961,6 +1963,9 @@ impl<T> IndexTree<T>{
                 forall |j:int, k:int| i <= j < k < children@.len() ==>
                    !#[trigger]self@.has_path(children@[j], children@[k]),
 
+
+                //I6
+                // self@.nodes[id].child =~= children@.subrange(i as int, children@.len() as int),
 
                 // children@ =~= self.
         {
@@ -2064,8 +2069,71 @@ impl<T> IndexTree<T>{
 }
 
 
+//efficient implementation
+impl<T> IndexTree<T>{
+    #[verifier::external_body]
+    pub fn take_children(&mut self, id: usize) -> (res:Vec<usize>)
+        requires old(self).nodes@.contains_key(id)
+        ensures
+            self.nodes@.dom() =~= old(self).nodes@.dom(),
+            forall |i:usize| i!=id && #[trigger]self.nodes@.contains_key(i) ==> self.nodes@[i] == old(self).nodes@[i],
+            self.nodes@[id].id == old(self).nodes@[id].id,
+            self.nodes@[id].val == old(self).nodes@[id].val,
+            self.nodes@[id].child@ =~= seq![],
+            res@ =~= old(self).nodes@[id].child@,
+    {
+        self.nodes.get_mut(&id).map(|node| {
+            std::mem::take(&mut node.child)
+        }).unwrap()
+    }
 
+    #[verifier::external_body]
+    pub fn revoke_2(&mut self, id:usize)
+    {
+        let children = self.take_children(id);
+        for i in 0..children.len()
+        {
+            let child = children[i];
+            self.revoke(child);
+            self.nodes.remove(&child);
+        }
+    }
 
+}
 
 
 }//verus!
+
+
+
+
+
+pub fn test(){
+
+    let n1 = Node{ id:1, child : vec![2,3], val : String::from("n1")};
+    let n2 = Node{ id:2, child : vec![], val : String::from("n2")};
+    let n3 = Node{ id:3, child : vec![5, 6], val : String::from("n3")};
+    let n4 = Node{ id:4, child : vec![], val : String::from("n4")};
+    let n5 = Node{ id:5, child : vec![4], val : String::from("n5")};
+    let n6 = Node{ id:6, child : vec![], val : String::from("n6")};
+
+    let mut tree = IndexTree { nodes : HashMap::new()};
+    tree.nodes.insert(1, n1);
+    tree.nodes.insert(2, n2);
+    tree.nodes.insert(3, n3);
+    tree.nodes.insert(4, n4);
+    tree.nodes.insert(5, n5);
+    tree.nodes.insert(6, n6);
+
+    println!("{:?}" , tree);
+
+    // tree.revoke_2(3);
+    tree.revoke(3);
+    println!("{:?}" , tree);
+
+
+    // tree.revoke(1);
+    // println!("{:?}" , tree);
+
+
+}
