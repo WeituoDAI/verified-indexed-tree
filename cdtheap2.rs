@@ -34,6 +34,7 @@ pub struct IndexTree<T>{
     // pub root : usize,
 }
 
+#[verifier::ext_equal]
 pub struct AbsTree<T>{
     pub nodes : Map<usize, NodeAbs<T>>,
 }
@@ -103,7 +104,7 @@ impl<T> AbsTree<T>{
         requires self.has_path(x, y)
         ensures self.contains(x), self.contains(y)
     {
-        admit()
+        admit() //doable
     }
 
     pub open spec fn descendants(self, id:usize) -> Set<usize>{
@@ -116,6 +117,17 @@ impl<T> AbsTree<T>{
     {
         assert forall |x:usize| #[trigger]self.has_path(id, x) implies self.contains(x) by{
             self.has_path_ensures(id, x)
+        }
+    }
+
+    pub proof fn lemma_descendants_0(self, id:usize)
+        requires !self.contains(id)
+        ensures self.descendants(id).is_empty()
+    {
+        if !self.descendants(id).is_empty() {
+            let k = self.descendants(id).choose();
+            assert(self.has_path(id, k));
+            self.lemma_has_path_ensures(id, k);
         }
     }
 
@@ -272,6 +284,17 @@ impl<T> AbsTree<T>{
         Self::lemma_remove_edges_to_1(pre.nodes, post.nodes, id, seq);
     }
 
+    proof fn lemma_remove_edges_to_twice(self, id:usize)
+        requires
+            self.wf(),
+            self.contains(id),
+        ensures
+            self.remove_edges_to(id).remove_edges_to(id) =~= self.remove_edges_to(id)
+    {
+        admit()
+    }
+        
+
         
     pub open spec fn remove_node(self, id:usize) -> Self
     {
@@ -297,6 +320,7 @@ impl<T> AbsTree<T>{
                 forall |i:usize| #[trigger]self.remove_node(id).contains(i) ==>
                     self.remove_node(id).nodes[i] =~=
                     self.nodes[i].remove_child(id),
+            self.remove_node(id).finite(),
     {
         if self.contains(id){
             let s = self.remove_edges_to(id);
@@ -428,7 +452,7 @@ impl<T> AbsTree<T>{
         ensures
             self.has_path(x, z),
     {
-        admit()
+        admit() //doable
     }
 
     pub proof fn lemma_path_contradict(self, x:usize, y:usize, z:usize)
@@ -466,13 +490,16 @@ impl<T> AbsTree<T>{
         ensures
             #[trigger]self.has_path(x, y)
     {
-        admit()
+        admit() // doable
     }
 
     pub proof fn lemma_has_path_ensures(self, x:usize, y:usize)
         requires
             self.has_path(x, y)
         ensures
+            self.contains(x),
+            self.contains(y),
+
             self.is_parent_of(x, y)
             ||
             (
@@ -483,7 +510,7 @@ impl<T> AbsTree<T>{
                 exists |z:usize| self.is_parent_of(x, z) && self.has_path(z, y)
             )
     {
-        admit()
+        admit() //doable
     }
 
     pub proof fn lemma_remove_node_path0(self, id:usize)
@@ -613,7 +640,7 @@ impl<T> AbsTree<T>{
                 #[trigger]self.remove_node(id).has_path(x, y)
                 ==> self.has_path(x, y)    
     {
-        admit() // not hard
+        admit() // doable
 
         // induction on the length of path
 
@@ -898,7 +925,6 @@ impl<T> AbsTree<T>{
         }   
     }
 
-    // false !!!
 
     pub proof fn lemma_revoke_path22(self, id:usize)
         requires
@@ -910,7 +936,7 @@ impl<T> AbsTree<T>{
                 self.has_path(x, y) ==>
                 #[trigger]self.revoke(id).has_path(x, y),
     {
-        admit() //todo
+        admit() //doable
 
         // induction on path len
 
@@ -2100,6 +2126,408 @@ impl<T> IndexTree<T>{
     }
 
 }
+
+
+impl<T> AbsTree<T>{
+
+    pub proof fn lemma_revoke_commut(self, i:usize, j:usize)
+        requires
+            self.wf(),
+        ensures
+            self.revoke(i).revoke(j) =~= self.revoke(j).revoke(i)
+    {
+        if !self.contains(i){
+            assert(self.descendants(i).is_empty()) by {
+                self.lemma_descendants_0(i)
+            }
+            self.lemma_revoke_ensures(i);
+            self.lemma_revoke_ensures(j);
+            assert(!self.revoke(j).contains(i));
+            assert(self.revoke(j).descendants(i).is_empty()) by {
+                self.revoke(j).lemma_descendants_0(i)
+            }
+        }
+        else if !self.contains(j){
+            assert(self.descendants(j).is_empty()) by {
+                self.lemma_descendants_0(j)
+            }
+            self.lemma_revoke_ensures(i);
+            self.lemma_revoke_ensures(j);
+            assert(!self.revoke(i).contains(j));
+            assert(self.revoke(i).descendants(j).is_empty()) by {
+                self.revoke(i).lemma_descendants_0(j)
+            }
+        }
+        else {
+            admit()
+        }
+    }
+
+
+    pub proof fn lemma_revoke_commut_1(self, i:usize, j:usize)
+        requires
+            self.wf(),
+            self.contains(i), self.contains(j),
+            !self.has_path(i, j),
+            !self.has_path(j, i),
+            i != j,
+        ensures
+            self.revoke(i).revoke(j) =~= self.revoke(j).revoke(i)
+    {
+        let des1 = self.descendants(i);
+        let des2 = self.revoke(i).descendants(j);
+
+        let des10 = self.descendants(j);
+        let des20 = self.revoke(j).descendants(i);
+
+        let res1 = self.revoke(i).revoke(j);
+        let res2 = self.revoke(j).revoke(i);
+
+        let f = |s:Self, id:usize| s.remove_node(id);
+
+        assert(res1 =~= des2.to_seq().fold_left(des1.to_seq().fold_left(self, f), f));
+
+        assert(res1 =~= (des1.to_seq() + des2.to_seq()).fold_left(self, f)) by {
+            let len1 = des1.to_seq().len();
+            let len2 = des2.to_seq().len();
+            assert((des1.to_seq() + des2.to_seq()).subrange(0, len1 as int) =~= des1.to_seq());
+            assert((des1.to_seq() + des2.to_seq()).subrange(len1 as int, len1 as int + len2) =~= des2.to_seq());
+            (des1.to_seq() + des2.to_seq()).lemma_fold_left_split(self, f, len1 as int);
+        }
+        
+        assert(res2 =~= (des10.to_seq() + des20.to_seq()).fold_left(self, f)) by {
+            let len1 = des10.to_seq().len();
+            let len2 = des20.to_seq().len();
+            assert((des10.to_seq() + des20.to_seq()).subrange(0, len1 as int) =~= des10.to_seq());
+            assert((des10.to_seq() + des20.to_seq()).subrange(len1 as int, len1 as int + len2) =~= des20.to_seq());
+            (des10.to_seq() + des20.to_seq()).lemma_fold_left_split(self, f, len1 as int);
+        }
+
+
+        assert(des2 =~= des10) by {self.lemma_descendants_revoke_1(i, j)}
+        assert(des1 =~= des20) by {self.lemma_descendants_revoke_1(j, i)}
+
+        assert(des10.to_seq() + des20.to_seq() =~= des2.to_seq() + des1.to_seq());
+
+        let s1 = des1.to_seq() + des2.to_seq();
+        let s2 = des2.to_seq() + des1.to_seq();
+
+        assert(des1.finite() && des2.finite()) by {
+            self.lemma_descendants(i);
+            self.lemma_descendants(j);
+        }
+
+        assert(s1.to_multiset() =~= s2.to_multiset()) by {
+            vstd::seq_lib::lemma_seq_union_to_multiset_commutative(des1.to_seq(), des2.to_seq())
+        }
+
+        let inv = |s:Self| s.finite();
+        let inv_e = |e:usize| true;
+        Self::lemma_remove_node_commut();
+        assert forall |s:Self, x:usize| inv(s) implies #[trigger]inv(f(s, x)) by {
+            s.lemma_remove_node_ensures(x);
+        } 
+        crate::fold::lemma_fold_left_permutation_with_inv(
+            s1, s2, f, self, inv, inv_e
+        );
+
+        assert(res1 =~= res2);
+    }
+
+    pub proof fn lemma_revoke_commut_2(self, i:usize, j:usize)
+        requires
+            self.wf(),
+            self.contains(i), self.contains(j),
+            self.has_path(i, j),
+            i != j,
+        ensures
+            self.revoke(i).revoke(j) =~= self.revoke(j).revoke(i)
+    {
+        let des1 = self.descendants(i);
+        let des2 = self.revoke(i).descendants(j);
+
+        let des10 = self.descendants(j);
+        let des20 = self.revoke(j).descendants(i);
+
+
+        assert(des20 + des10 =~= des1) by {
+            self.lemma_descendants_revoke_2(i, j);
+        }
+
+        assert(des2.is_empty()) by {
+            assert(!self.revoke(i).contains(j)) by {
+                self.lemma_revoke_ensures(i);
+            }
+            self.revoke(i).lemma_descendants_0(j)
+        }
+
+        let res1 = self.revoke(i).revoke(j);
+        let res2 = self.revoke(j).revoke(i);
+        let f = |s:Self, id:usize| s.remove_node(id);
+        assert(res1 =~= des1.to_seq().fold_left(self, f));
+        assert(res2 =~= (des10.to_seq() + des20.to_seq()).fold_left(self, f)) by {
+            let len1 = des10.to_seq().len();
+            let len2 = des20.to_seq().len();
+            assert((des10.to_seq() + des20.to_seq()).subrange(0, len1 as int) =~= des10.to_seq());
+            assert((des10.to_seq() + des20.to_seq()).subrange(len1 as int, len1 as int + len2) =~= des20.to_seq());
+            (des10.to_seq() + des20.to_seq()).lemma_fold_left_split(self, f, len1 as int);
+        }
+
+        assert(des1.to_seq().to_multiset() =~= (des10.to_seq() + des20.to_seq()).to_multiset()) by {
+
+            assert(des1 =~= des10 + des20);
+            
+
+            admit()
+        }
+
+
+        admit()
+    }
+
+
+    proof fn lemma_descendants_revoke_1(self, i:usize, j:usize)
+        requires
+            self.wf(),
+            self.contains(i), self.contains(j),
+            !self.has_path(i, j),
+            !self.has_path(j, i),
+            i != j,
+        ensures
+            self.revoke(i).descendants(j) =~= self.descendants(j)
+    {
+        assert forall |x:usize| self.has_path(j, x) implies
+            #[trigger]self.revoke(i).has_path(j, x) by
+        {
+            assert(!self.has_path(i, x)) by {
+                if self.has_path(i, x) {
+                    self.lemma_path_cross(i, j, x)
+                }
+            }
+            self.lemma_revoke_path22(i);
+        }
+        assert(self.descendants(j).subset_of(self.revoke(i).descendants(j)));
+
+        assert forall |x:usize| #[trigger]self.revoke(i).has_path(j, x) implies
+            self.has_path(j, x) by
+        {
+            self.lemma_revoke_path1(i)
+        }
+        assert(self.revoke(i).descendants(j).subset_of(self.descendants(j)));
+    }
+
+    proof fn lemma_descendants_revoke_2(self, i:usize, j:usize)
+        requires
+            self.wf(),
+            self.contains(i), self.contains(j),
+            self.has_path(i, j),
+            i != j,
+        ensures
+            self.revoke(j).descendants(i) + self.descendants(j) =~=
+                self.descendants(i)
+    {
+        assert forall |x:usize| self.has_path(j, x) implies self.has_path(i, x) by
+        {
+            self.lemma_path_trans(i, j, x)
+        }
+        assert(self.descendants(j).subset_of(self.descendants(i)));
+        assert forall |x:usize| #[trigger]self.revoke(j).has_path(i, x) implies self.has_path(i, x) by
+        {
+            self.lemma_revoke_path1(j)
+        }
+        assert(self.revoke(j).descendants(i).subset_of(self.descendants(i)));
+        assert((self.revoke(j).descendants(i) + self.descendants(j)).subset_of(self.descendants(i)));
+
+
+        assert forall |x:usize| self.has_path(i, x) && !self.has_path(j, x) implies
+            #[trigger]self.revoke(j).has_path(i, x)
+        by{
+            self.lemma_revoke_path22(j);
+        }
+        assert(self.descendants(i).subset_of(self.revoke(j).descendants(i) + self.descendants(j)));
+    } 
+
+
+
+    proof fn lemma_path_cross(self, x:usize, y:usize, z:usize)
+        requires
+            self.wf(),
+            self.has_path(x, z),
+            self.has_path(y, z),
+            x != y,
+        ensures
+            self.has_path(x, y) || self.has_path(y, x)
+    {
+        admit()
+    }
+
+
+}
+
+
+impl<T> AbsTree<T>{
+    pub open spec fn remove_edges_from(self, parent:usize) -> Self{
+        let node = self.nodes[parent];
+        let new_node = NodeAbs{
+            id : node.id,
+            child : seq![],
+            val : node.val,
+        };
+        Self{
+            nodes : self.nodes.insert(parent, new_node)
+        }
+    }
+
+    proof fn remove_edges_from_eqv_fold_remove_edge(self, parent:usize)
+        requires
+            self.nodes.contains_key(parent),
+            self.wf(),
+        ensures
+            self.childs_seq(parent).fold_left(
+                self,
+                |b:Self, a:usize| b.remove_one_edge(parent, a)
+            )        
+            =~= self.remove_edges_from(parent)
+        // decreases self.childs_seq(parent)
+    {
+        let f = |b:Self, a:usize| b.remove_one_edge(parent, a);
+        let childs_seq = self.childs_seq(parent);
+        let res = childs_seq.fold_left(self, f);
+
+        let inv_2 = |s:Self, l:Seq<usize>|
+            s.nodes.contains_key(parent)
+            && s.nodes.dom() =~= self.nodes.dom()
+            && (forall |i:usize| i!=parent && #[trigger]s.nodes.contains_key(i) ==> s.nodes[i] == self.nodes[i])
+            && s.nodes[parent].id == self.nodes[parent].id
+            && s.nodes[parent].val == self.nodes[parent].val
+            && s.nodes[parent].child =~= 
+                l.fold_left(
+                    self.nodes[parent].child,
+                    |b:Seq<usize>, a:usize| b.remove_value(a)
+                );
+        
+        assert forall |i:int| 0 <= i < childs_seq.len() &&
+            #[trigger]inv_2(childs_seq.take(i).fold_left(self, f), childs_seq.take(i)) implies
+            inv_2(childs_seq.take(i+1).fold_left(self, f), childs_seq.take(i+1))
+        by {
+            assert(childs_seq.take(i) =~= childs_seq.take(i+1).drop_last());
+        };
+
+        assert(inv_2(res, childs_seq)) by {
+            crate::fold::lemma_fold_left_preserves_inv_3(childs_seq, f, self, inv_2)
+        }
+        // assert(
+        //     res.nodes[parent].child =~=
+        //     childs_seq.fold_left(
+        //         childs_seq,
+        //         |b:Seq<usize>, a:usize| b.remove_value(a)
+        //     )
+        // );
+        assert(res.nodes[parent].child =~= seq![]) by {
+            Self::lemma_fold_remove_value(childs_seq);
+        }
+        // Self::lemma_remove_edges_from_ensures(self, parent, res)
+    }
+
+    proof fn lemma_fold_remove_value<A>(s:Seq<A>)
+        ensures
+            s.fold_left(
+                s,
+                |b:Seq<A>, a:A| b.remove_value(a)
+            )
+            =~= seq![]
+        decreases s.len()
+    {
+        Self::lemma_fold_remove_value_2(s, s.len() as int)
+    }
+
+    proof fn lemma_fold_remove_value_2<A>(s:Seq<A>, i:int)
+        requires
+            0 <= i <= s.len(),
+        ensures
+            s.subrange(0, i).fold_left(
+                s,
+                |b:Seq<A>, a:A| b.remove_value(a)
+            )
+            =~= s.subrange(i, s.len() as int)
+        decreases i
+    {
+        if i == 0 {}
+        else {
+            let s1 = s.subrange(0, i);
+            let s2 = s.subrange(0, i - 1);
+            let v = s1.last();
+            assert(v == s[i-1]);
+            assert(s2 =~= s1.drop_last());
+            let res = s1.fold_left(s, |b:Seq<A>, a:A| b.remove_value(a));
+            let res1 = s2.fold_left(s, |b:Seq<A>, a:A| b.remove_value(a));
+            assert(res == res1.remove_value(v));
+            assert(res1 =~= s.subrange(i - 1, s.len() as int)) by {
+                Self::lemma_fold_remove_value_2(s, i-1);
+            }
+            assert(s.subrange(i-1, s.len() as int)[0] == v);
+
+            res1.index_of_first_ensures(v);
+            assert(res =~= res1.remove(0));
+            assert(s.subrange(i as int, s.len() as int) =~= s.subrange(i - 1, s.len() as int).remove(0))
+        }
+    }
+
+            
+
+    proof fn lemma_remove_edges_from_ensures(self, id:usize, res:Self)
+        requires
+            self.nodes.contains_key(id),
+            res.nodes.dom() =~= self.nodes.dom(),
+            forall |i:usize| i!=id && #[trigger]res.nodes.contains_key(i) ==> res.nodes[i] == self.nodes[i],
+            res.nodes[id].id == self.nodes[id].id,
+            res.nodes[id].val == self.nodes[id].val,
+            res.nodes[id].child =~= seq![],
+        ensures
+            res =~= self.remove_edges_from(id),
+    {}
+
+    proof fn lemma_remove_one_edge_and_remove_node(self, parent:usize, child:usize)
+        requires    
+            self.wf(),
+            self.is_parent_of(parent, child)
+        ensures
+            self.remove_one_edge(parent, child).remove_node(child)
+            =~= self.remove_node(child)
+    {
+        let r1 = self.remove_edges_to(child);
+        let r2 = self.remove_one_edge(parent, child);
+        assert(r1 =~= r2) by {
+            self.lemma_remove_one_edge_remove_edges_to(parent, child);
+        }
+        let res1 = r2.remove_node(child);
+        let res2 = self.remove_node(child);
+        assert(res2.nodes =~= r1.nodes.remove(child));
+        assert(res2.nodes =~= r2.nodes.remove(child));
+        let r22 = r2.remove_edges_to(child);
+        assert(r22 =~= r2) by {
+            self.lemma_remove_edges_to_twice(child)
+        }
+    }
+
+
+
+
+    // proof fn lemma_remove_one_edge_commut_remove_node(self, x:usize, y:usize)
+    //     requires
+    //         self.wf(),
+    //     ensures
+    //         self.remove_node(x).remove_edges_to(y) =~= self.remove_edges_to(y).remove_node(x)
+    // {
+
+    // }
+
+
+}
+
+
+
+
 
 
 }//verus!
