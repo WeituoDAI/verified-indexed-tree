@@ -138,7 +138,22 @@ pub proof fn lemma_no_duplicates_seq_to_set_to_multiset<A>(s1:Seq<A>, s2:Seq<A>)
   ensures
     s1.to_multiset() =~= s2.to_multiset()
 {
-  admit()
+  s1.lemma_multiset_has_no_duplicates();
+  s2.lemma_multiset_has_no_duplicates();
+
+  assert forall |e:A| s1.to_multiset().contains(e) implies s2.to_multiset().contains(e) by {
+    broadcast use vstd::seq_lib::group_to_multiset_ensures;
+    assert(s1.contains(e));
+    assert(s1.to_set().contains(e));
+    assert(s2.contains(e));
+  }
+
+  assert forall |e:A| s2.to_multiset().contains(e) implies s1.to_multiset().contains(e) by {
+    broadcast use vstd::seq_lib::group_to_multiset_ensures;
+    assert(s2.contains(e));
+    assert(s2.to_set().contains(e));
+    assert(s1.contains(e));
+  }
 }
 
 }//verus!

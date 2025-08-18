@@ -388,18 +388,68 @@ impl<T> AbsTree<T>{
         self.revoke(id).remove_node(id)
     }
 
-    pub open spec fn remove_one_edge(self, parent:usize, child:usize) -> Self{
-        let nodes = self.nodes;
-        let node = nodes[parent];
-        let new_node = NodeAbs{
-            val : node.val,
-            id : node.id,
-            child : node.child.remove_value(child),
-        };   
-        let new_nodes = nodes.insert(parent, new_node);
-        Self{
-            nodes : new_nodes
+    pub open spec fn remove_one_edge(self, parent:usize, child:usize) -> Self
+    {
+        if self.contains(parent){
+            let nodes = self.nodes;
+            let node = nodes[parent];
+            let new_node = NodeAbs{
+                val : node.val,
+                id : node.id,
+                child : node.child.remove_value(child),
+            };   
+            let new_nodes = nodes.insert(parent, new_node);
+            Self{
+                nodes : new_nodes
+            }
         }
+        else {
+            self
+        }
+    }
+
+    pub proof fn lemma_remove_one_edge_commut(self, p1:usize, c1:usize, p2:usize, c2:usize)
+        ensures
+            self.remove_one_edge(p1, c1).remove_one_edge(p2, c2)
+            =~=
+            self.remove_one_edge(p2, c2).remove_one_edge(p1, c1)
+    {
+        let res1 = self.remove_one_edge(p1, c1).remove_one_edge(p2, c2).nodes;
+        let res2 = self.remove_one_edge(p2, c2).remove_one_edge(p1, c1).nodes;
+        let nodes = self.nodes;
+
+        if self.contains(p1) && self.contains(p2){
+            let n1 = nodes[p1];
+            // let n2 = nodes[p2];
+            let new_node1 = NodeAbs{
+                val : n1.val,
+                id : n1.id,
+                child : n1.child.remove_value(c1),
+            };
+
+
+            if p1 == p2 {
+                // let r1 = self.remove_one_edge(p1, c1).nodes;
+                // assert(r1 =~= nodes.insert(p1, new_node1));
+                let new_node2 = NodeAbs{
+                    val : new_node1.val,
+                    id : new_node1.id,
+                    child : new_node1.child.remove_value(c2),
+                };
+                let new_node3 = NodeAbs{
+                    val : n1.val,
+                    id : n1.id,
+                    child : n1.child.remove_value(c2).remove_value(c1),
+                };
+                // assert(res1 =~= r1.insert(p2, new_node2));
+                assert(res1 =~= nodes.insert(p1, new_node2));
+                assert(res2 =~= nodes.insert(p1, new_node3));
+                crate::fold::lemma_remove_value_commut(n1.child, c1, c2);
+            }
+            else {}
+        }
+        else if !self.contains(p1) {}
+        else {}
     }
 }
 
@@ -421,8 +471,7 @@ impl<T> AbsTree<T>{
     }
 
     pub open spec fn acyclic(self) -> bool{
-        forall |i:usize| #[trigger] self.contains(i) ==>
-            (! self.has_path(i, i))
+        forall |i:usize| ! #[trigger]self.has_path(i, i)
     }
 
     pub open spec fn no_common_child(self) -> bool{
@@ -1045,6 +1094,31 @@ impl<T> AbsTree<T>{
         }
     }
 
+
+
+    pub proof fn lemma_remove_one_edge_path0(self, parent:usize, child:usize)
+        requires
+            self.wf(),
+        ensures
+            forall |x:usize, y:usize|
+                #[trigger]self.remove_one_edge(parent, child).is_parent_of(x, y)
+                ==> self.is_parent_of(x, y)
+    {
+        admit()
+    }
+
+    pub proof fn lemma_remove_one_edge_path(self, parent:usize, child:usize)
+        requires
+            self.wf(),
+        ensures
+            forall |x:usize, y:usize|
+                #[trigger]self.remove_one_edge(parent, child).has_path(x, y)
+                ==> self.has_path(x, y)
+    {
+        admit()
+    }
+
+
 }   
 
 
@@ -1161,11 +1235,76 @@ impl<T> AbsTree<T>{
         self.revoke(id).lemma_remove_node_wf(id);
     }
 
-    // pub proof fn lemma_remove_one_edge_wf(self, parent:usize, child:usize)
-    //     requires self.wf(), self.is_parent_of(parent, child)
-    //     ensures self.remove_one_edge(parent, child).wf(), self.remove_one_edge(parent, child).dom() =~= self.dom()
-    // {
-    // }
+    pub proof fn lemma_remove_one_edge_wf(self, parent:usize, child:usize)
+        requires self.wf(),
+        ensures
+            self.remove_one_edge(parent, child).wf(),
+            self.remove_one_edge(parent, child).dom() =~= self.dom(),
+    {
+        if self.contains(parent){
+            let post = self.remove_one_edge(parent, child);
+            assert(post.finite());
+            assert forall |i:usize| #[trigger] post.contains(i) implies 
+                    post.nodes[i].child.to_set().subset_of(post.dom())
+                    && post.nodes[i].child.no_duplicates() by
+            {
+                if i == parent {
+                    assert(post.nodes[i].child =~= self.nodes[i].child.remove_value(child));
+                    self.nodes[i].child.index_of_first_ensures(child)
+                }
+                else {
+                    assert(self.nodes[i] =~= post.nodes[i])
+                }
+            }
+
+            assert(post.wf_0());
+            assert(post.no_common_child()) by {
+                assert forall |i:usize, j:usize, k:usize|
+                    post.is_parent_of(i, k) && post.is_parent_of(j, k)
+                    implies i == j by
+                {
+                    self.lemma_remove_one_edge_path0(parent, child);
+                    assert(self.is_parent_of(i, k));
+                    assert(self.is_parent_of(j, k));
+                    assert(i == j)
+                }
+            }
+
+            assert(post.acyclic()) by {
+                if !post.acyclic(){
+                    let p = choose |p:usize| post.has_path(p, p);
+                    assert(post.has_path(p, p));
+                    assert(self.has_path(p, p)) by{
+                        self.lemma_remove_one_edge_path(parent, child);
+                    }
+                    // assert(post.contains(p)) by {
+                    //     post.has_path_ensures(p, p)
+                    // }
+                    assert(!self.acyclic());
+                }
+            }
+        }
+    }
+
+    pub proof fn lemma_remove_edges_from_wf(self, id:usize)
+        requires
+            self.wf(),
+            self.contains(id),
+        ensures
+            self.remove_edges_from(id).wf(),
+    {
+        self.remove_edges_from_eqv_fold_remove_edge(id);
+        assert forall |s:Self, x:usize| s.wf() implies #[trigger] s.remove_one_edge(id, x).wf()
+        by{
+            s.lemma_remove_one_edge_wf(id, x)
+        }
+        crate::fold::lemma_fold_left_preserves_inv(
+            self.childs_seq(id),
+            |s:Self, x:usize| s.remove_one_edge(id, x),
+            self,
+            |s:Self| s.wf()
+        );
+    }
 }
 
 
@@ -1810,27 +1949,6 @@ impl<T> AbsTree<T>{
         }
     }
 
-    //main lemma 2
-    // proof fn lemma_revoke_commut()
-    //     ensures
-    //         forall |v:Self, x:usize, y:usize|
-    //             v.wf() ==>
-    //             #[trigger]v.revoke(x).revoke(y)
-    //             ==
-    //             v.revoke(y).revoke(x)
-    // {
-    //     assert forall |v:Self, x:usize, y:usize|
-    //             v.wf() implies
-    //             #[trigger]v.revoke(x).revoke(y)
-    //             ==
-    //             v.revoke(y).revoke(x) by
-    //     {
-    //         // let r1 = v.revoke(x);
-    //         // assert(r1.wf()) by { v.lemma_revoke_wf(x) }   
-
-    //     }
-    // }
-
     // proof fn lemma_remove_edges
 
     #[verifier::spinoff_prover]
@@ -1888,6 +2006,9 @@ impl<T> AbsTree<T>{
     }
 
 }
+
+
+
 
 
 
@@ -2128,6 +2249,7 @@ impl<T> IndexTree<T>{
 }
 
 
+// revoke commut
 impl<T> AbsTree<T>{
 
     pub proof fn lemma_revoke_commut(self, i:usize, j:usize)
@@ -2159,7 +2281,19 @@ impl<T> AbsTree<T>{
             }
         }
         else {
-            admit()
+            if self.has_path(i, j){
+                assert(i != j);
+                self.lemma_revoke_commut_2(i, j)
+            }
+            else if self.has_path(j, i){
+                self.lemma_revoke_commut_2(j, i)
+            }
+            else {
+                if i == j {}
+                else {
+                    self.lemma_revoke_commut_1(i, j)
+                }
+            }
         }
     }
 
@@ -2241,7 +2375,8 @@ impl<T> AbsTree<T>{
             self.has_path(i, j),
             i != j,
         ensures
-            self.revoke(i).revoke(j) =~= self.revoke(j).revoke(i)
+            self.revoke(i).revoke(j) =~= self.revoke(j).revoke(i),
+            self.revoke(j).revoke(i) =~= self.revoke(i),
     {
         let des1 = self.descendants(i);
         let des2 = self.revoke(i).descendants(j);
@@ -2273,16 +2408,105 @@ impl<T> AbsTree<T>{
             (des10.to_seq() + des20.to_seq()).lemma_fold_left_split(self, f, len1 as int);
         }
 
+        assert(des1.finite()) by {
+            self.lemma_descendants(i);
+        }
+        assert(des10.finite()) by {
+            self.lemma_descendants(j);
+        }
+        assert(self.revoke(j).wf()) by{
+            self.lemma_revoke_wf(j)
+        }
+        assert(des20.finite()) by {
+            self.revoke(j).lemma_descendants(i);
+        }
+        des1.lemma_to_seq_to_set_id();
+        des10.lemma_to_seq_to_set_id();
+        des20.lemma_to_seq_to_set_id();
+
         assert(des1.to_seq().to_multiset() =~= (des10.to_seq() + des20.to_seq()).to_multiset()) by {
 
             assert(des1 =~= des10 + des20);
             
+            assert(des1.to_seq().no_duplicates()) by{
+                crate::set::lemma_set_to_seq_no_duplicates(des1);
+            }
+            assert(des10.to_seq().no_duplicates()) by{
+                crate::set::lemma_set_to_seq_no_duplicates(des10);
+            }
+            assert(des20.to_seq().no_duplicates()) by{
+                crate::set::lemma_set_to_seq_no_duplicates(des20);
+            }
 
-            admit()
+            assert((des10.to_seq() + des20.to_seq()).to_set() =~= des10.to_seq().to_set() + des20.to_seq().to_set()) by{
+                vstd::seq_lib::seq_to_set_distributes_over_add(des10.to_seq(), des20.to_seq());
+            }
+
+            let s = des10.to_seq() + des20.to_seq();
+
+
+            assert forall |e:usize| des10.contains(e) && des20.contains(e) implies false by
+            {
+                assert(self.has_path(j, e));
+                assert(!self.revoke(j).contains(e)) by{
+                    self.lemma_revoke_ensures(j);
+                }
+                assert(self.revoke(j).has_path(i, e));
+                assert(self.revoke(j).contains(e)) by {
+                    self.revoke(j).lemma_has_path_ensures(i, e)
+                }
+            }
+
+            assert(s.no_duplicates()) by {
+                assert forall|p, q| (0 <= p < s.len() && 0 <= q < s.len() && p != q) && s[p] == s[q] implies false by {
+                    let l1 = des10.to_seq().len();
+                    let l2 = des20.to_seq().len();
+
+                    if p < l1 && q < l1 {
+                        assert(des10.to_seq().no_duplicates());
+                        assert(false)
+                    }
+                    else if l1 <= p && l1 <= q {
+                        assert(des20.to_seq().no_duplicates());
+                        assert(false)
+                    }
+                    else if p < l1 && l1 <= q{
+                        assert(des10.contains(s[p]));
+                        assert(des20.contains(s[q]));
+                    }
+                    else {
+                        assert(des10.contains(s[q]));
+                        assert(des20.contains(s[p]));
+                    }
+                }
+            }
+            
+            crate::set::lemma_no_duplicates_seq_to_set_to_multiset(des1.to_seq(), s);
         }
 
+        let inv = |s:Self| s.wf();
+        assert forall |v:Self, x:usize, y:usize|
+            inv(v)
+            implies #[trigger]f(f(v, x), y) == f(f(v, y), x)
+        by
+        {
+            Self::lemma_remove_node_commut()
+        }
 
-        admit()
+        assert forall |v:Self, x:usize| inv(v) implies #[trigger]inv(f(v, x)) by {
+            v.lemma_remove_node_wf(x)
+        }
+
+        assert(res1 == res2) by {
+            crate::fold::lemma_fold_left_permutation_with_inv(
+                des1.to_seq(),
+                des10.to_seq() + des20.to_seq(),
+                f,
+                self,
+                inv,
+                |x:usize| true
+            )
+        }
     }
 
 
@@ -2359,13 +2583,293 @@ impl<T> AbsTree<T>{
             self.has_path(x, y) || self.has_path(y, x)
     {
         admit()
+        // prove by induction on the length of path
     }
 
 
 }
 
+//revoke_and_remove_self commut
+impl<T> AbsTree<T>{
+    pub proof fn lemma_revoke_and_remove_self_commut(self, i:usize, j:usize)
+        requires
+            self.wf(),
+        ensures
+            self.revoke_and_remove_self(i).revoke_and_remove_self(j)
+            =~=
+            self.revoke_and_remove_self(j).revoke_and_remove_self(i),
+    {
+        if i != j {
+            let r1 = self.revoke(i);
+            let r2 = self.revoke(j);
+            let res1 = self.revoke_and_remove_self(i).revoke_and_remove_self(j);
+            let res2 = self.revoke_and_remove_self(j).revoke_and_remove_self(i);
+
+            if !self.contains(i) {
+                self.lemma_descendants_0(i);
+                assert(res1 =~= self.revoke_and_remove_self(j));
+                self.lemma_revoke_and_remove_self_wf(j);
+                assert(!self.revoke_and_remove_self(j).contains(i));
+                self.revoke_and_remove_self(j).lemma_descendants_0(i);
+                assert(res2 =~= self.revoke_and_remove_self(j));
+            }
+            else if !self.contains(j) {
+                self.lemma_descendants_0(j);
+                assert(res2 =~= self.revoke_and_remove_self(i));
+                self.lemma_revoke_and_remove_self_wf(i);
+                assert(!self.revoke_and_remove_self(i).contains(j));
+                self.revoke_and_remove_self(i).lemma_descendants_0(j);
+                assert(res1 =~= self.revoke_and_remove_self(i));
+            }
+            else {
+                self.lemma_revoke_wf(i);
+                assert(self.revoke(i).remove_node(i).revoke(j) =~= self.revoke(i).revoke(j).remove_node(i)) by {
+                    r1.lemma_revoke_and_remove_self_commut_1(i, j);
+                }
+
+                assert(res1 =~= self.revoke(i).revoke(j).remove_node(i).remove_node(j));
+                self.lemma_revoke_commut(i, j);
+
+                assert(res1 =~= self.revoke(j).revoke(i).remove_node(i).remove_node(j));
+                self.lemma_revoke_wf(j);
+                self.revoke(j).lemma_revoke_wf(i);
+                assert(self.revoke(j).revoke(i).remove_node(i).remove_node(j) =~=  self.revoke(j).revoke(i).remove_node(j).remove_node(i)) by {
+                    Self::lemma_remove_node_commut()
+                }
+
+                assert(res1 =~= self.revoke(j).revoke(i).remove_node(j).remove_node(i));
+
+                assert(self.revoke(j).revoke(i).remove_node(j) =~= self.revoke(j).remove_node(j).revoke(i)) by {
+                    r2.lemma_revoke_and_remove_self_commut_1(j, i);
+                }
+            }
+
+        }
+    }
+
+
+    proof fn lemma_revoke_and_remove_self_commut_1(self, i:usize, j:usize)
+        requires
+            self.wf(),
+            self.contains(i),
+            self.descendants(i).is_empty(),
+            i != j,
+        ensures
+            self.remove_node(i).revoke(j)
+            =~=
+            self.revoke(j).remove_node(i),
+    {
+        let s1 = self.remove_node(i);
+        let des1 = s1.descendants(j);
+        let des0 = self.descendants(j);
+        assert(s1.wf()) by {
+            self.lemma_remove_node_wf(i)
+        }
+        if self.has_path(j, i) {
+            assert(self.descendants(j).contains(i));
+            assert(!self.revoke(j).contains(i)) by {
+                self.lemma_revoke_wf(j)
+            }
+            assert(self.revoke(j).remove_node(i) =~= self.revoke(j));
+            s1.lemma_descendants(j);
+            assert(!des1.contains(i)) by {
+                self.lemma_remove_node_ensures(i);
+                assert(!s1.contains(i));
+                assert(des1.subset_of(s1.dom()));
+            }
+            assert forall |e:usize| s1.has_path(j, e) implies self.has_path(j, e) by {
+                self.lemma_remove_node_path(i)
+            }
+            assert(des1.subset_of(des0));
+            assert(des1.insert(i).subset_of(des0));
+
+            assert forall |e:usize |self.has_path(j, e) && e != i implies #[trigger]self.remove_node(i).has_path(j, e) by{
+                self.lemma_remove_node_path(i);
+                assert(j != i);
+                assert(e != i);
+                assert(!self.has_path(i, e)) by{
+                    if self.has_path(i, e) {
+                        assert(self.descendants(i).contains(e))
+                    }
+                }
+            }
+
+            assert(des0 =~= des1.insert(i));
+            let l1 = des1.insert(i).to_seq();
+            let l2 = seq![i] + des1.to_seq();
+
+            assert(l1.to_multiset() =~= l2.to_multiset()) by{
+                des0.lemma_to_seq_to_set_id();
+                des1.lemma_to_seq_to_set_id();
+                assert(l2.to_set() =~= des1.to_seq().to_set().insert(i)) by {
+                    assert(l2.to_set() =~= set![i] + des1.to_seq().to_set()) by {
+                        vstd::seq_lib::seq_to_set_distributes_over_add(seq![i], des1.to_seq());
+                        assert(seq![i].to_set() =~= set![i]) by {
+                            let v : Seq<usize> = seq![];
+                            assert(v.to_set().is_empty());
+                            assert(v.push(i).to_set() =~= v.to_set().insert(i)) by {
+                                v.lemma_push_to_set_commute(i)
+                            }
+                        }
+                    }
+                }
+                assert(l1.to_set() =~= l2.to_set());
+                assert(l1.no_duplicates()) by {
+                    crate::set::lemma_set_to_seq_no_duplicates(des0)
+                }
+                assert(l2.no_duplicates()) by {
+                    crate::set::lemma_set_to_seq_no_duplicates(des1);
+                    assert(!des1.contains(i))
+                }
+                crate::set::lemma_no_duplicates_seq_to_set_to_multiset(l1, l2);
+            }
+
+            let res1 = self.remove_node(i).revoke(j);
+            let res2 = self.revoke(j);
+            let f = |s:Self, x:usize| s.remove_node(x);
+
+            assert(res2 =~= l1.fold_left(self, f));
+
+
+            assert(res1 =~= l2.fold_left(self, f)) by {
+                assert(self.remove_node(i) =~= seq![i].fold_left(self, f)) by {
+                    reveal_with_fuel(vstd::seq::Seq::fold_left, 2)
+                }
+                assert(res1 =~= des1.to_seq().fold_left(seq![i].fold_left(self, f), f));
+                (seq![i] + des1.to_seq()).lemma_fold_left_split(self, f, 1);
+                assert((seq![i] + des1.to_seq()).subrange(0, 1) =~= seq![i]);
+                assert((seq![i] + des1.to_seq()).subrange(1, (seq![i] + des1.to_seq()).len() as int) =~= des1.to_seq());
+            }
+
+            let inv = |s:Self| s.wf();
+            assert forall |v:Self, x:usize| inv(v) implies #[trigger] inv(f(v, x)) by {
+                v.lemma_remove_node_wf(x)
+            }
+            assert forall |v:Self, x:usize, y:usize| inv(v) implies #[trigger] f(f(v, x), y) == f(f(v, y), x) by {
+                Self::lemma_remove_node_commut()
+            }
+            crate::fold::lemma_fold_left_permutation_with_inv(
+                l1,
+                l2,
+                f,
+                self,
+                inv,
+                |x:usize| true
+            )
+        }
+        else if self.has_path(i, j){
+            assert(self.descendants(i).contains(j));
+            assert(false);
+        }
+        else {
+            self.lemma_descendants(j);
+            s1.lemma_descendants(j);
+            assert(des1 =~= des0) by {
+                assert forall |e:usize|#[trigger]self.remove_node(i).has_path(j, e) implies self.has_path(j, e) by {
+                    self.lemma_remove_node_path(i);
+                }
+                assert forall |e:usize| self.has_path(j, e) implies #[trigger]self.remove_node(i).has_path(j, e) by {
+                    self.lemma_remove_node_path(i);
+                    assert(j != i);
+                    assert(e != i);
+                    assert(!self.has_path(i, e)) by {
+                        if self.has_path(i, e){
+                            self.lemma_path_cross(i, j, e)
+                        }
+                    }
+                }
+            }
+            let res1 = self.remove_node(i).revoke(j);
+            let res2 = self.revoke(j).remove_node(i);
+            let f = |s:Self, x:usize| s.remove_node(x);
+            assert(res1 =~= (seq![i] + des1.to_seq()).fold_left(self, f)) by {
+                assert(self.remove_node(i) =~= seq![i].fold_left(self, f)) by {
+                    reveal_with_fuel(vstd::seq::Seq::fold_left, 2)
+                }
+                assert(res1 =~= des1.to_seq().fold_left(seq![i].fold_left(self, f), f));
+                (seq![i] + des1.to_seq()).lemma_fold_left_split(self, f, 1);
+                assert((seq![i] + des1.to_seq()).subrange(0, 1) =~= seq![i]);
+                assert((seq![i] + des1.to_seq()).subrange(1, (seq![i] + des1.to_seq()).len() as int) =~= des1.to_seq());
+            }
+
+            assert(res2 =~= (des0.to_seq() + seq![i]).fold_left(self, f)) by {
+                assert((des0.to_seq() + seq![i]).drop_last() =~= des0.to_seq());
+            }
+
+            assert(des0 =~= des1);
+            assert(des0.to_seq().no_duplicates()) by {
+                crate::set::lemma_set_to_seq_no_duplicates(des0);
+            }
+            assert(des1.to_seq().no_duplicates()) by {
+                crate::set::lemma_set_to_seq_no_duplicates(des1);
+            }
+            assert(des0.to_seq().to_multiset() =~= des1.to_seq().to_multiset()) by{
+                crate::set::lemma_no_duplicates_seq_to_set_to_multiset(des0.to_seq(), des1.to_seq())
+            }
+            assert((des0.to_seq() + seq![i]).to_multiset() =~= 
+                des0.to_seq().to_multiset().insert(i)
+            ) by {
+                assert(des0.to_seq() + seq![i] =~= des0.to_seq().push(i));
+                broadcast use vstd::seq_lib::group_to_multiset_ensures;
+            }
+
+            assert((seq![i] + des1.to_seq()).to_multiset() =~= 
+                des1.to_seq().to_multiset().insert(i)
+            ) by {
+                assert(seq![i] + des1.to_seq() =~= des1.to_seq().insert(0, i));
+                broadcast use vstd::seq_lib::group_to_multiset_ensures;
+            }
+
+            assert((des0.to_seq() + seq![i]).to_multiset() =~= (seq![i] + des1.to_seq()).to_multiset());
+
+            assert(res1 =~= res2) by {
+                let inv = |s:Self| s.wf();
+                assert forall |v:Self, x:usize| inv(v) implies #[trigger] inv(f(v, x)) by {
+                    v.lemma_remove_node_wf(x)
+                }
+                assert forall |v:Self, x:usize, y:usize| inv(v) implies #[trigger] f(f(v, x), y) == f(f(v, y), x) by {
+                    Self::lemma_remove_node_commut()
+                }
+                crate::fold::lemma_fold_left_permutation_with_inv(
+                    des0.to_seq() + seq![i],
+                    seq![i] + des0.to_seq(),
+                    f,
+                    self,
+                    inv,
+                    |x:usize| true
+                )
+            }
+        }
+    }
+}
+
+
 
 impl<T> AbsTree<T>{
+
+    pub proof fn lemma_remove_one_edge_ensures0(self, parent:usize, child:usize)
+        requires
+            self.is_parent_of(parent, child)
+        ensures
+            self.remove_one_edge(parent, child).childs_seq(parent)
+            =~= self.childs_seq(parent).remove_value(child)
+    {}
+
+    pub proof fn lemma_remove_first_edge(self, parent:usize, child:usize)
+        requires
+            self.is_parent_of(parent, child),
+            self.childs_seq(parent).first() == child,
+        ensures
+            self.remove_one_edge(parent, child).childs_seq(parent)
+            =~= self.childs_seq(parent).drop_first(),
+    {
+        self.lemma_remove_one_edge_ensures0(parent, child);
+        let childs_seq = self.childs_seq(parent);
+        childs_seq.index_of_first_ensures(child);
+    }
+
+
+
     pub open spec fn remove_edges_from(self, parent:usize) -> Self{
         let node = self.nodes[parent];
         let new_node = NodeAbs{
@@ -2473,7 +2977,7 @@ impl<T> AbsTree<T>{
         }
     }
 
-            
+
 
     proof fn lemma_remove_edges_from_ensures(self, id:usize, res:Self)
         requires
@@ -2487,28 +2991,28 @@ impl<T> AbsTree<T>{
             res =~= self.remove_edges_from(id),
     {}
 
-    proof fn lemma_remove_one_edge_and_remove_node(self, parent:usize, child:usize)
-        requires    
-            self.wf(),
-            self.is_parent_of(parent, child)
-        ensures
-            self.remove_one_edge(parent, child).remove_node(child)
-            =~= self.remove_node(child)
-    {
-        let r1 = self.remove_edges_to(child);
-        let r2 = self.remove_one_edge(parent, child);
-        assert(r1 =~= r2) by {
-            self.lemma_remove_one_edge_remove_edges_to(parent, child);
-        }
-        let res1 = r2.remove_node(child);
-        let res2 = self.remove_node(child);
-        assert(res2.nodes =~= r1.nodes.remove(child));
-        assert(res2.nodes =~= r2.nodes.remove(child));
-        let r22 = r2.remove_edges_to(child);
-        assert(r22 =~= r2) by {
-            self.lemma_remove_edges_to_twice(child)
-        }
-    }
+    // proof fn lemma_remove_one_edge_and_remove_node(self, parent:usize, child:usize)
+    //     requires    
+    //         self.wf(),
+    //         self.is_parent_of(parent, child)
+    //     ensures
+    //         self.remove_one_edge(parent, child).remove_node(child)
+    //         =~= self.remove_node(child)
+    // {
+    //     let r1 = self.remove_edges_to(child);
+    //     let r2 = self.remove_one_edge(parent, child);
+    //     assert(r1 =~= r2) by {
+    //         self.lemma_remove_one_edge_remove_edges_to(parent, child);
+    //     }
+    //     let res1 = r2.remove_node(child);
+    //     let res2 = self.remove_node(child);
+    //     assert(res2.nodes =~= r1.nodes.remove(child));
+    //     assert(res2.nodes =~= r2.nodes.remove(child));
+    //     let r22 = r2.remove_edges_to(child);
+    //     assert(r22 =~= r2) by {
+    //         self.lemma_remove_edges_to_twice(child)
+    //     }
+    // }
 
 
 
@@ -2521,10 +3025,400 @@ impl<T> AbsTree<T>{
     // {
 
     // }
+}
+
+
+// main lemma !!!!!!
+impl<T> AbsTree<T>{
+
+    pub proof fn main_lemma(self, id:usize)
+        requires
+            self.wf(),
+            self.contains(id),
+        ensures
+            self.childs_seq(id).fold_left(
+                self.remove_edges_from(id),
+                |s:Self, x:usize| s.revoke_and_remove_self(x)
+            )
+            =~= self.revoke(id)
+        decreases
+            self.childs_seq(id),
+    {
+        let childs_seq = self.childs_seq(id);
+
+        if childs_seq.len() == 0 {
+            admit()
+        }
+        else {
+            let child1 = childs_seq.first();
+            let s1 = self.remove_edges_from(id);
+            let f = |b:Self, a:usize| b.remove_one_edge(id, a);
+
+            assert(s1 =~= childs_seq.fold_left(self, f)) by {
+                self.remove_edges_from_eqv_fold_remove_edge(id)
+            }
+            let childs_seq2 = childs_seq.drop_first();
+            let s0 = self.remove_one_edge(id, child1);
+            assert(s0.wf()) by {
+                self.lemma_remove_one_edge_wf(id, child1);
+            }
+            assert(s1.wf()) by {
+                self.lemma_remove_edges_from_wf(id);
+            }
+
+            assert(childs_seq.fold_left(self, f)
+                =~=
+                childs_seq2.fold_left(s0, f)) by 
+            {
+                childs_seq.lemma_fold_left_alt(self, f);
+                childs_seq2.lemma_fold_left_alt(s0, f)
+            }
+            
+            let g = |s:Self, x:usize| s.revoke_and_remove_self(x);
+            let res = childs_seq.fold_left(self.remove_edges_from(id), g);
+
+            assert(res =~=
+                childs_seq.fold_left(childs_seq2.fold_left(s0, f), g)
+            );
+            assert(s1 =~= childs_seq2.fold_left(s0, f));
+
+            // let r1 = childs_seq2.fold_left(s0, f);
+            // assert(r1.)
+
+            let childs_perm = childs_seq2 + seq![child1];
+
+            assert(childs_perm.to_multiset() =~= childs_seq.to_multiset()) by{
+                broadcast use vstd::seq_lib::group_to_multiset_ensures;
+                assert(childs_perm =~= childs_seq2.push(child1));
+                assert(childs_seq =~= childs_seq2.insert(0, child1));
+            }
+
+            let inv = |s:Self| s.wf();
+            assert forall |s:Self, x:usize| inv(s) implies #[trigger] inv(g(s, x)) by {
+                s.lemma_revoke_and_remove_self_wf(x)
+            }
+            assert forall |s:Self, x:usize, y:usize| inv(s) implies #[trigger]
+                g(g(s, x), y) == g(g(s, y), x) by
+            {
+                s.lemma_revoke_and_remove_self_commut(x, y)
+            }
+            assert(
+                childs_perm.fold_left(s1, g)
+                ==
+                childs_seq.fold_left(s1, g)
+            ) by 
+            {
+                crate::fold::lemma_fold_left_permutation_with_inv(
+                    childs_perm,
+                    childs_seq,
+                    g,
+                    s1,
+                    inv,
+                    |x:usize| true
+                )
+            }
+
+            assert(childs_perm.drop_last() =~= childs_seq2);
+            assert(res =~=
+                childs_seq2.
+                    fold_left(
+                        childs_seq2.fold_left(s0, f),
+                        g
+                    ).revoke_and_remove_self(child1)
+            );
+
+
+            assert(childs_seq2 =~= s0.childs_seq(id)) by{
+                self.lemma_remove_first_edge(id, child1)
+            }
+            assert(childs_seq2.fold_left(s0, f) =~= s0.remove_edges_from(id)) by{
+                s0.remove_edges_from_eqv_fold_remove_edge(id)
+            }
+
+            assert(res =~=
+                s0.childs_seq(id).
+                    fold_left(
+                        s0.remove_edges_from(id),
+                        g
+                    ).revoke_and_remove_self(child1)
+            );
+
+            //induction
+            assert(
+                s0.childs_seq(id).
+                    fold_left(
+                        s0.remove_edges_from(id),
+                        g
+                    )
+                =~=
+                s0.revoke(id)
+            ) by {
+                s0.main_lemma(id)
+            }
+
+            assert(
+                self.remove_one_edge(id, child1)
+                    .revoke(id)
+                    .revoke_and_remove_self(child1)
+                =~=
+                self.revoke(id)
+            )
+            by {
+                self.lemma_aux_999(id, child1)
+            }
+        }
+    }
+
+    proof fn lemma_aux_999(self, id:usize, child:usize)
+        requires
+            self.wf(),
+            self.is_parent_of(id, child),
+        ensures
+            self.remove_one_edge(id, child)
+                .revoke(id)
+                .revoke_and_remove_self(child)
+            =~=
+            self.revoke(id)
+    {
+        self.lemma_aux_99(id, child);
+        self.lemma_aux_9(id, child);
+
+        let des1 = self.descendants(child);
+        assert(des1 =~= self.remove_one_edge(id, child).descendants(child));
+        let des2 = self.remove_one_edge(id, child).descendants(id);
+        let des = self.descendants(id);
+        assert(des =~= des1 + des2 + set![child]);
+
+        let s0 = self.remove_one_edge(id, child);
+        let f = |s:Self, x:usize| s.remove_node(x);
+        let res = self.remove_one_edge(id, child)
+                        .revoke(id)
+                        .revoke_and_remove_self(child);
+        assert(res =~= s0.revoke(id).revoke(child).remove_node(child));
+
+        assert(s0.wf()) by { self.lemma_remove_one_edge_wf(id, child)}
+        assert(!s0.has_path(id, child)) by {
+            admit()
+        }
+        assert(!s0.has_path(child, id)) by {
+            admit()
+        }
+
+        assert(s0.revoke(id).descendants(child) =~= s0.descendants(child)) by{
+            assert(s0.revoke(id).descendants(child).subset_of(s0.descendants(child))) by{
+                s0.lemma_revoke_path1(id);
+            }
+            assert(s0.descendants(child).subset_of(s0.revoke(id).descendants(child))) by{
+                assert forall |y:usize|
+                    s0.has_path(child, y) implies #[trigger] s0.revoke(id).has_path(child, y)
+                by{
+                    s0.lemma_revoke_path22(id);
+                    assert(child != id) by {
+                        if child == id {
+                            assert(self.is_parent_of(id, id));
+                            self.lemma_parent_to_path(id, id);
+                        }
+                    }
+                    assert(!s0.has_path(id, y)) by {
+                        if s0.has_path(id, y){
+                            s0.lemma_path_cross(id, child, y)
+                        }
+                    }
+                }
+            }
+        }
+
+        assert(
+            res =~=
+                des1.to_seq().fold_left(
+                    des2.to_seq().fold_left(
+                        s0, f
+                    ),
+                    f
+                ).remove_node(child)
+        );
+        s0.lemma_descendants(child);
+        s0.lemma_descendants(id);
+        let len2 = des2.to_seq().len();
+        let len1 = des1.to_seq().len();
+        let des00 = des2.to_seq() + des1.to_seq();
+        assert(des00.subrange(0, len2 as int) =~= des2.to_seq());
+        assert(des00.subrange(len2 as int, des00.len() as int) =~= des1.to_seq());
+        des00.lemma_fold_left_split(s0, f, len2 as int);
+
+        assert(res =~= des00.fold_left(s0, f).remove_node(child));
+        assert((des00 + seq![child]).drop_last() =~= des00);
+        assert(res =~= (des2.to_seq() + des1.to_seq() + seq![child]).fold_left(s0, f));
+        assert(des =~= des1 + des2 + set![child]);
+
+
+
+        // assert(!des1.contains(child))
+        // assert(!des2.contains(child))
+        // assert(des1.disjoint(des2))
+
+        assert((des2.to_seq() + des1.to_seq() + seq![child]).to_multiset()
+            =~= (seq![child] + des2.to_seq() + des1.to_seq()).to_multiset()
+        ) by {
+            admit()
+        }
+        assert((seq![child] + des2.to_seq() + des1.to_seq()).to_multiset() =~= des.to_seq().to_multiset()) by{
+            admit()
+        }
+
+
+        assert(
+            res =~=
+            (seq![child] + des2.to_seq() + des1.to_seq()).fold_left(s0, f)
+        )
+        by
+        {
+            assert forall |s:Self, x:usize| s.wf() implies #[trigger]f(s, x).wf() by{
+                s.lemma_remove_node_wf(x)
+            }
+            assert forall |s:Self, x:usize, y:usize| s.wf() implies #[trigger]f(f(s, x), y) == f(f(s, y), x)  by{
+                Self::lemma_remove_node_commut()
+            }
+
+            crate::fold::lemma_fold_left_permutation_with_inv(
+               seq![child] + des2.to_seq() + des1.to_seq(),
+               des2.to_seq() + des1.to_seq() + seq![child],
+               f,
+               s0,
+               |s:Self| s.wf(),
+               |x:usize| true 
+            )
+        }
+
+        assert((seq![child] + des2.to_seq() + des1.to_seq()).drop_first() =~= des2.to_seq() + des1.to_seq());
+        (seq![child] + des2.to_seq() + des1.to_seq()).lemma_fold_left_alt(s0, f);
+        // (des2.to_seq() + des1.to_seq()).lemma_fold_left_alt(s0.remove_node(child), f);
+        assert(res =~=
+            (des2.to_seq() + des1.to_seq()).fold_left_alt(
+                s0.remove_node(child), f
+            )
+        );
+        assert(self.remove_one_edge(id, child).remove_node(child) =~= self.remove_node(child)) by{
+            admit()
+        }
+        assert(res =~= 
+            (des2.to_seq() + des1.to_seq()).fold_left_alt(
+                self.remove_node(child), f
+            )
+        );
+        assert(res =~= 
+            (seq![child] + des2.to_seq() + des1.to_seq()).fold_left_alt(
+                self, f
+            )
+        );
+        (seq![child] + des2.to_seq() + des1.to_seq()).lemma_fold_left_alt(self, f);
+        assert(res =~= 
+            (seq![child] + des2.to_seq() + des1.to_seq()).fold_left(
+                self, f
+            )
+        );
+
+
+        assert(
+            des.to_seq().fold_left(self, f) =~=
+            (seq![child] + des2.to_seq() + des1.to_seq()).fold_left(self, f)
+        )
+        by
+        {
+            assert forall |s:Self, x:usize| s.wf() implies #[trigger]f(s, x).wf() by{
+                s.lemma_remove_node_wf(x)
+            }
+            assert forall |s:Self, x:usize, y:usize| s.wf() implies #[trigger]f(f(s, x), y) == f(f(s, y), x)  by{
+                Self::lemma_remove_node_commut()
+            }
+            crate::fold::lemma_fold_left_permutation_with_inv(
+               seq![child] + des2.to_seq() + des1.to_seq(),
+               des.to_seq(),
+               f,
+               self,
+               |s:Self| s.wf(),
+               |x:usize| true 
+            )
+        }
+    }
+
+    proof fn lemma_aux_99(self, id:usize, child:usize)
+        requires
+            self.wf(),
+            self.is_parent_of(id, child),
+        ensures
+            self.remove_one_edge(id, child).descendants(child)
+            =~= self.descendants(child)
+    {
+        assert(self.remove_one_edge(id, child).descendants(child).subset_of(self.descendants(child))) by{
+            self.lemma_remove_one_edge_path(id, child)
+        }
+        assert(self.descendants(child).subset_of(self.remove_one_edge(id, child).descendants(child))) by{
+            assert forall |y:usize| self.has_path(child, y) implies
+                #[trigger] self.remove_one_edge(id, child).has_path(child, y) by
+            {
+                self.lemma_aux_99_99(id, child, y)
+            }
+        }
+    }
+
+    proof fn lemma_aux_99_99(self, id:usize, child:usize, y:usize)
+        requires
+            self.wf(),
+            self.is_parent_of(id, child),
+            self.has_path(child, y),
+        ensures
+            self.remove_one_edge(id, child).has_path(child, y)
+    {
+        admit()
+        // prove by induction on length of path
+    }
+
+    proof fn lemma_aux_9(self, id:usize, child:usize)
+        requires
+            self.wf(),
+            self.is_parent_of(id, child),
+        ensures
+            self.remove_one_edge(id, child).descendants(id)
+            + self.remove_one_edge(id, child).descendants(child)
+            + set![child]
+            =~= self.descendants(id)
+    {
+        let set1 = self.remove_one_edge(id, child).descendants(id)
+            + self.remove_one_edge(id, child).descendants(child)
+            + set![child];
+        assert(set1.subset_of(self.descendants(id))) by{
+            assert(self.has_path(id, child)) by {
+                self.lemma_parent_to_path(id, child)
+            }
+
+            assert forall |y:usize|
+                #[trigger] self.remove_one_edge(id, child).has_path(id, y)
+                implies self.has_path(id, y)
+            by
+            {
+                self.lemma_remove_one_edge_path(id, child)
+            }
+            assert(self.remove_one_edge(id, child).descendants(id).subset_of(self.descendants(id)));
+
+
+            assert forall |y:usize|
+                #[trigger] self.has_path(child, y)
+                implies self.has_path(id, y)
+            by
+            {
+                self.lemma_path_trans(id, child, y)
+            }
+            self.lemma_aux_99(id, child);
+            assert(self.remove_one_edge(id, child).descendants(child).subset_of(self.descendants(id)));
+        }
+
+        admit()
+    }
+
 
 
 }
-
 
 
 
