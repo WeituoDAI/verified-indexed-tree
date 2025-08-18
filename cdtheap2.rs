@@ -785,9 +785,11 @@ impl<T> AbsTree<T>{
         {
 
             let inv = |s:Self| (!s.has_path(id, x)) && s.wf() && s.is_parent_of(x, y);
-            let inv_e = |e:usize| self.has_path(id, e);
 
-            assert forall |e:usize, acc:Self| (inv_e(e) && inv(acc)) implies #[trigger]inv(f(acc, e)) by{
+            assert forall |e:usize, acc:Self| (des.contains(e) && inv(acc)) implies #[trigger]inv(f(acc, e)) by{
+                self.descendants(id).lemma_to_seq_to_set_id();
+                assert(self.descendants(id).contains(e));
+                assert(self.has_path(id, e));
                 acc.lemma_remove_node_wf(e);
                 acc.lemma_remove_node_path(e);
                 assert(f(acc, e).wf());
@@ -827,13 +829,7 @@ impl<T> AbsTree<T>{
                 }
             }
 
-            assert forall |e:usize| des.contains(e) implies inv_e(e) by {
-                self.descendants(id).lemma_to_seq_to_set_id();
-                assert(self.descendants(id).contains(e));
-                assert(self.has_path(id, e));
-            }
-
-            crate::fold::lemma_fold_left_preserves_inv_2(des, f, self, inv, inv_e);
+            crate::fold::lemma_fold_left_preserves_inv(des, f, self, inv);
 
             assert(post.wf());
             assert(!post.has_path(id, x));
@@ -852,17 +848,14 @@ impl<T> AbsTree<T>{
                 (!s.has_path(id, x)) && s.wf() && s.nodes[x] =~= self.nodes[x]
                 && s.contains(x) 
             ;
-            let inv_e = |e:usize| self.has_path(id, e);
-            assert forall |e:usize| des.contains(e) implies inv_e(e) by {
-                self.descendants(id).lemma_to_seq_to_set_id();
-                assert(self.descendants(id).contains(e));
-                assert(self.has_path(id, e));
-            }
 
-            assert forall |e:usize, acc:Self| (inv_e(e) && inv(acc)) implies #[trigger]inv(f(acc, e)) by{
+            assert forall |e:usize, acc:Self| (des.contains(e) && inv(acc)) implies #[trigger]inv(f(acc, e)) by{
                 acc.lemma_remove_node_wf(e);
                 acc.lemma_remove_node_path(e);
                 acc.lemma_remove_node_path0(e);
+                self.descendants(id).lemma_to_seq_to_set_id();
+                assert(self.descendants(id).contains(e));
+                assert(self.has_path(id, e));
                 assert(f(acc, e).wf());
                 assert(!f(acc, e).has_path(id, x)) by {
                     if acc.remove_node(e).has_path(id, x) {
@@ -907,7 +900,7 @@ impl<T> AbsTree<T>{
                     }
                 }
             }
-            crate::fold::lemma_fold_left_preserves_inv_2(des, f, self, inv, inv_e);
+            crate::fold::lemma_fold_left_preserves_inv(des, f, self, inv);
             assert(post.contains(x));
             assert(post.nodes[x] =~= self.nodes[x]);
         }
@@ -937,11 +930,13 @@ impl<T> AbsTree<T>{
                 #[trigger]self.revoke(id).is_parent_of(x, y) by
         {
             let inv = |s:Self| (!s.has_path(id, y)) && s.wf() && s.is_parent_of(x, y);
-            let inv_e = |e:usize| self.has_path(id, e);
 
-            assert forall |e:usize, acc:Self| (inv_e(e) && inv(acc)) implies #[trigger]inv(f(acc, e)) by{
+            assert forall |e:usize, acc:Self| (des.contains(e) && inv(acc)) implies #[trigger]inv(f(acc, e)) by{
                 acc.lemma_remove_node_wf(e);
                 acc.lemma_remove_node_path(e);
+                self.descendants(id).lemma_to_seq_to_set_id();
+                assert(self.descendants(id).contains(e));
+                assert(self.has_path(id, e));
                 assert(f(acc, e).wf());
                 assert(!f(acc, e).has_path(id, y)) by {
                     if acc.remove_node(e).has_path(id, y) {
@@ -965,13 +960,8 @@ impl<T> AbsTree<T>{
                     }
                 }
             }
-            assert forall |e:usize| des.contains(e) implies inv_e(e) by {
-                self.descendants(id).lemma_to_seq_to_set_id();
-                assert(self.descendants(id).contains(e));
-                assert(self.has_path(id, e));
-            }
-            crate::fold::lemma_fold_left_preserves_inv_2(des, f, self, inv, inv_e);
-        }   
+            crate::fold::lemma_fold_left_preserves_inv(des, f, self, inv);
+        }
     }
 
 
@@ -1890,7 +1880,7 @@ impl<T> AbsTree<T>{
                 Self::lemma_remove_node_commut()
             }
             crate::fold::lemma_fold_left_permutation_with_inv(
-                des1.to_seq(), seq, f, self, inv, |x:usize|true
+                des1.to_seq(), seq, f, self, inv,
             )
         }
 
@@ -2356,13 +2346,12 @@ impl<T> AbsTree<T>{
         }
 
         let inv = |s:Self| s.finite();
-        let inv_e = |e:usize| true;
         Self::lemma_remove_node_commut();
         assert forall |s:Self, x:usize| inv(s) implies #[trigger]inv(f(s, x)) by {
             s.lemma_remove_node_ensures(x);
-        } 
+        }
         crate::fold::lemma_fold_left_permutation_with_inv(
-            s1, s2, f, self, inv, inv_e
+            s1, s2, f, self, inv
         );
 
         assert(res1 =~= res2);
@@ -2504,7 +2493,6 @@ impl<T> AbsTree<T>{
                 f,
                 self,
                 inv,
-                |x:usize| true
             )
         }
     }
@@ -2754,7 +2742,6 @@ impl<T> AbsTree<T>{
                 f,
                 self,
                 inv,
-                |x:usize| true
             )
         }
         else if self.has_path(i, j){
@@ -2836,7 +2823,6 @@ impl<T> AbsTree<T>{
                     f,
                     self,
                     inv,
-                    |x:usize| true
                 )
             }
         }
@@ -3114,7 +3100,6 @@ impl<T> AbsTree<T>{
                     g,
                     s1,
                     inv,
-                    |x:usize| true
                 )
             }
 
@@ -3286,7 +3271,6 @@ impl<T> AbsTree<T>{
                f,
                s0,
                |s:Self| s.wf(),
-               |x:usize| true 
             )
         }
 
@@ -3337,7 +3321,6 @@ impl<T> AbsTree<T>{
                f,
                self,
                |s:Self| s.wf(),
-               |x:usize| true 
             )
         }
     }

@@ -3,7 +3,52 @@ use vstd::prelude::*;
 verus!{
 
 
-pub proof fn lemma_fold_reverse<A, B>(s:Seq<A>, v:B,  f:spec_fn(B, A) -> B)
+
+proof fn lemma_fold_reverse1<A, B>(s:Seq<A>, v:B,  f:spec_fn(A, B) -> B)
+    ensures
+        s.reverse().fold_right(f, v) == s.fold_left(v, |b:B, a:A|f(a, b)),
+    decreases s.len()
+{
+    let g = |b:B, a:A|f(a, b);
+    if s.len() == 0 {}
+    else {
+        let last = s.last();
+        let s0 = s.drop_last();
+        assert(s.reverse() =~= seq![last] + s0.reverse());
+
+        let res1 = s.reverse().fold_right(f, v);
+        let res2 = s.fold_left(v, g);
+        assert(
+            res1 == s.reverse().fold_right_alt(f, v)
+        ) by {
+            s.reverse().lemma_fold_right_alt(f, v)
+        }
+
+        assert(
+            res2 == g(s0.fold_left(v, g), last)
+        );
+
+        assert(s.reverse().first() == last);
+        assert(s.reverse().subrange(1, s.reverse().len() as int) =~= s0.reverse());
+        assert(
+            res1 == f(last, s0.reverse().fold_right_alt(f, v))
+        );
+        assert(
+            res1 ==  f(last, s0.reverse().fold_right(f, v))
+        ) by {
+            s0.reverse().lemma_fold_right_alt(f, v)
+        }
+
+        assert(
+            res2 == g(s0.fold_left(v, g), last)
+        );
+        lemma_fold_reverse1(s0, v, f);
+    }
+}
+
+
+
+proof fn lemma_fold_reverse<A, B>(s:Seq<A>, v:B,  f:spec_fn(B, A) -> B)
     ensures
         s.fold_left(v, f) == s.reverse().fold_right(|a:A, b:B|f(b, a), v),
     decreases s.len()
@@ -130,7 +175,7 @@ pub proof fn lemma_remove_value_commut<T>(x:Seq<T>, y:T, z:T)
                 }
             }
         }
-    }   
+    }
 }
 
 
@@ -152,28 +197,6 @@ pub proof fn lemma_fold_left_preserves_inv<A, B>
         }
     }
 }
-
-
-pub proof fn lemma_fold_left_preserves_inv_2<A, B>
-    (l: Seq<A>, f: spec_fn(B, A) -> B, v: B, inv:spec_fn(B) -> bool, inv_e:spec_fn(A)->bool)
-    requires
-        inv(v),
-        forall |e:A, v:B| (inv_e(e) && inv(v)) ==> #[trigger]inv(f(v, e)),
-        forall |e:A| l.contains(e) ==> #[trigger]inv_e(e),
-    ensures
-        inv(l.fold_left(v, f))
-    decreases l.len(),
-{
-    if l.len() > 0 {
-        let l0 = l.drop_last();
-        let r0 = l0.fold_left(v, f);
-        assert(l.fold_left(v, f) == f(r0, l.last()));
-        assert(inv(r0)) by{
-            lemma_fold_left_preserves_inv_2(l0, f, v, inv, inv_e);
-        }
-    }
-}
-
 
 pub proof fn lemma_fold_left_preserves_inv_3<A, B>
     (l: Seq<A>, f: spec_fn(B, A) -> B, v: B, inv:spec_fn(B, Seq<A>) -> bool)
@@ -217,46 +240,11 @@ pub proof fn lemma_fold_left_preserves_inv_3<A, B>
     }
 }
 
-
-
-
-
-
-pub proof fn lemma_fold_right_commute_one_with_inv<A, B>
-    (s:Seq<A>, a: A, f: spec_fn(A, B) -> B, v: B, inv:spec_fn(B)->bool, inv_e:spec_fn(A)->bool)
-    requires
-        // commutative_foldr(f),
-        forall |v:B, x:A, y:A|
-            inv(v) && inv_e(x) && inv_e(y)
-            ==> #[trigger]f(x, f(y, v)) == f(y, f(x, v)),
-
-        forall |x:A| #[trigger]s.contains(x) ==> inv_e(x),
-
-        forall |v:B, x:A| inv_e(x) && inv(v) ==> #[trigger]inv(f(x, v)),
-
-        inv(v), inv_e(a),
-    ensures
-        s.fold_right(f, f(a, v)) == f(a, s.fold_right(f, v)),
-    decreases s.len(),
-{
-    if s.len() > 0 {
-        assert(forall |x:A| #[trigger]s.drop_last().contains(x) ==> s.contains(x));
-
-        assert(inv_e(s.last())) by { assert(s.contains(s.last())) };
-
-        lemma_fold_right_commute_one_with_inv(s.drop_last(), a, f, f(s.last(), v), inv, inv_e);
-
-    }
-}
-
-
-
-pub proof fn lemma_fold_right_preserves_inv_2<A, B>
-    (l: Seq<A>, f: spec_fn(A, B) -> B, v: B, inv:spec_fn(B) -> bool, inv_e:spec_fn(A)->bool)
+pub proof fn lemma_fold_right_preserves_inv<A, B>
+    (l: Seq<A>, f: spec_fn(A, B) -> B, v: B, inv:spec_fn(B) -> bool)
     requires
         inv(v),
-        forall |e:A, v:B| (inv_e(e) && inv(v)) ==> #[trigger]inv(f(e, v)),
-        forall |e:A| l.contains(e) ==> #[trigger]inv_e(e),
+        forall |e:A, v:B| (l.contains(e) && inv(v)) ==> #[trigger]inv(f(e, v)),
     ensures
         inv(l.fold_right(f, v))
     decreases l.len(),
@@ -264,23 +252,56 @@ pub proof fn lemma_fold_right_preserves_inv_2<A, B>
     if l.len() > 0 {
         let l0 = l.drop_last();
         assert(forall |e:A| #[trigger]l0.contains(e) ==> l.contains(e));
-        assert(inv_e(l.last())) by { assert(l.contains(l.last()))};
+        assert(l.contains(l.last()));
         assert(l.fold_right(f, v) == l0.fold_right(f, f(l.last(), v)));
-        lemma_fold_right_preserves_inv_2(l0, f, f(l.last(), v), inv, inv_e);
+        lemma_fold_right_preserves_inv(l0, f, f(l.last(), v), inv);
     }
 }
 
 
+// For a commutative fold_right operator, any folding order
+// (i.e., any permutation) produces the same result.
+pub proof fn lemma_fold_left_permutation<A, B>(l1: Seq<A>, l2: Seq<A>, f: spec_fn(B, A) -> B, v: B)
+    requires
+        commutative_foldl(f),
+        l1.to_multiset() == l2.to_multiset(),
+    ensures
+        l1.fold_left(v, f) == l2.fold_left(v, f),
+{
+    lemma_fold_left_permutation_with_inv(l1, l2, f, v, |b:B|true)
+}
 
-pub proof fn lemma_fold_right_permutation_with_inv<A, B>(l1: Seq<A>, l2: Seq<A>, f: spec_fn(A, B) -> B, v: B, inv:spec_fn(B)->bool, inv_e:spec_fn(A)->bool)
+
+
+pub proof fn lemma_fold_right_commute_one_with_inv<A, B>
+    (s:Seq<A>, a: A, f: spec_fn(A, B) -> B, v: B, inv:spec_fn(B)->bool)
     requires
         forall |v:B, x:A, y:A|
-            inv(v) && inv_e(x) && inv_e(y)
+            inv(v) && (s.contains(x) || x == a) && (s.contains(y) || y == a)
             ==> #[trigger]f(x, f(y, v)) == f(y, f(x, v)),
 
-        forall |x:A| #[trigger]l1.contains(x) ==> inv_e(x),
+        forall |v:B, x:A| (s.contains(x) || x == a) && inv(v) ==> #[trigger]inv(f(x, v)),
 
-        forall |v:B, x:A| inv_e(x) && inv(v) ==> #[trigger]inv(f(x, v)),
+        inv(v),
+    ensures
+        s.fold_right(f, f(a, v)) == f(a, s.fold_right(f, v)),
+    decreases s.len(),
+{
+    if s.len() > 0 {
+        assert(forall |x:A| #[trigger]s.drop_last().contains(x) ==> s.contains(x));
+        assert(s.contains(s.last()));
+        lemma_fold_right_commute_one_with_inv(s.drop_last(), a, f, f(s.last(), v), inv);
+    }
+}
+
+
+pub proof fn lemma_fold_right_permutation_with_inv<A, B>(l1: Seq<A>, l2: Seq<A>, f: spec_fn(A, B) -> B, v: B, inv:spec_fn(B)->bool)
+    requires
+        forall |v:B, x:A, y:A|
+            inv(v) && l1.contains(x) && l1.contains(y)
+            ==> #[trigger]f(x, f(y, v)) == f(y, f(x, v)),
+
+        forall |v:B, x:A| l1.contains(x) && inv(v) ==> #[trigger]inv(f(x, v)),
 
         inv(v),
 
@@ -300,24 +321,20 @@ pub proof fn lemma_fold_right_permutation_with_inv<A, B>(l1: Seq<A>, l2: Seq<A>,
         assert(forall |x:A| #[trigger]l2.contains(x) ==> l2.to_multiset().contains(x));
         assert(forall |x:A| #[trigger]l2.contains(x) ==> l1.contains(x));
 
-        assert(inv_e(a)) by { assert(l1.contains(a)) };
-        assert forall |x:A| #[trigger]l1.drop_last().contains(x) implies inv_e(x) by{
-            assert(l1.contains(x))
-        }
-        assert forall |x:A| #[trigger]l2.subrange(0, i).contains(x) implies inv_e(x) by{
-            assert(l2.contains(x));
-        }
-        assert forall |x:A| #[trigger]l2.subrange(i+1, l2.len() as int).contains(x) implies inv_e(x) by{
-            assert(l2.contains(x));
-        }
+        assert(l1.contains(a));
+
+        assert(forall |x:A| #[trigger] l2.subrange(i + 1, l2.len() as int).contains(x) ==> l2.contains(x));
+        assert(forall |x:A| #[trigger]l1.drop_last().contains(x) ==> l1.contains(x));
+        assert(forall |x:A| #[trigger]l2.subrange(0, i).contains(x) ==> l2.contains(x));
+
 
         assert(inv(l2r)) by {
-            lemma_fold_right_preserves_inv_2(l2.subrange(i + 1, l2.len() as int), f, v, inv, inv_e)
+            lemma_fold_right_preserves_inv(l2.subrange(i + 1, l2.len() as int), f, v, inv)
         };
 
 
-        lemma_fold_right_commute_one_with_inv(l1.drop_last(), a, f, v, inv, inv_e);
-        lemma_fold_right_commute_one_with_inv(l2.subrange(0, i), a, f, l2r, inv, inv_e);
+        lemma_fold_right_commute_one_with_inv(l1.drop_last(), a, f, v, inv);
+        lemma_fold_right_commute_one_with_inv(l2.subrange(0, i), a, f, l2r, inv);
 
         l2.lemma_fold_right_split(f, v, i + 1);
         l2.remove(i).lemma_fold_right_split(f, v, i);
@@ -330,24 +347,20 @@ pub proof fn lemma_fold_right_permutation_with_inv<A, B>(l1: Seq<A>, l2: Seq<A>,
             i + 1,
             l2.len() as int,
         ));
-        lemma_fold_right_permutation_with_inv(l1.drop_last(), l2.remove(i), f, v, inv, inv_e);
+        lemma_fold_right_permutation_with_inv(l1.drop_last(), l2.remove(i), f, v, inv);
     } else {
         assert(l2.to_multiset().len() == 0);
     }
 }
 
-
-
 pub proof fn lemma_fold_left_permutation_with_inv<A, B>
-    (l1: Seq<A>, l2: Seq<A>, f: spec_fn(B, A) -> B, v: B, inv:spec_fn(B) -> bool, inv_e:spec_fn(A)->bool)
+    (l1: Seq<A>, l2: Seq<A>, f: spec_fn(B, A) -> B, v: B, inv:spec_fn(B) -> bool)
     requires
         forall |v:B, x:A, y:A|
-            inv(v) && inv_e(x) && inv_e(y)
+            inv(v) && l1.contains(x) && l1.contains(y)
             ==> #[trigger]f(f(v, x), y) == f(f(v, y), x),
 
-        forall |x:A| #[trigger]l1.contains(x) ==> inv_e(x),
-
-        forall |v:B, x:A| inv_e(x) && inv(v) ==> #[trigger]inv(f(v, x)),
+        forall |v:B, x:A| l1.contains(x) && inv(v) ==> #[trigger]inv(f(v, x)),
 
         inv(v),
 
@@ -374,24 +387,9 @@ pub proof fn lemma_fold_left_permutation_with_inv<A, B>
     assert(forall |x:A| #[trigger] l2.reverse().contains(x) ==> l2.contains(x));
 
     lemma_fold_right_permutation_with_inv(l1.reverse(), l2.reverse(), g, v,
-        inv, inv_e
+        inv,
     );
 }
-
-
-
-// For a commutative fold_right operator, any folding order
-// (i.e., any permutation) produces the same result.
-pub proof fn lemma_fold_left_permutation<A, B>(l1: Seq<A>, l2: Seq<A>, f: spec_fn(B, A) -> B, v: B)
-    requires
-        commutative_foldl(f),
-        l1.to_multiset() == l2.to_multiset(),
-    ensures
-        l1.fold_left(v, f) == l2.fold_left(v, f),
-{
-    lemma_fold_left_permutation_with_inv(l1, l2, f, v, |b:B|true, |a:A|true)
-}
-
 
 
 
