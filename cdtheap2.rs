@@ -35,6 +35,7 @@ impl<T> NodeAbs<T>{
 }
 
 
+// for further use, we should reconsider the visibility of spec fn
 impl<T> AbsTree<T>{
     pub open spec fn dom(self) -> Set<usize>{
         self.nodes.dom()
@@ -52,8 +53,19 @@ impl<T> AbsTree<T>{
         &&& self.nodes[parent].child.contains(child)
     }
 
-    //todo
-    pub uninterp spec fn has_path(self, parent:usize, child:usize) -> bool;
+    pub closed spec fn has_path(self, parent:usize, child:usize) -> bool{
+        exists |i:int| self.has_path_i(parent, child, i)
+    }
+
+    pub closed spec fn has_path_i(self, parent:usize, child:usize, i:int) -> bool
+        decreases i
+    {
+        if i <= 0 { false }
+        else if i == 1 { self.is_parent_of(parent, child) }
+        else {
+            exists |z:usize| self.is_parent_of(parent, z) && self.has_path_i(z, child, i-1)
+        }
+    }
 
     pub open spec fn descendants(self, id:usize) -> Set<usize>{
         Set::new(|x:usize| self.has_path(id, x))
@@ -392,14 +404,19 @@ impl<T> AbsTree<T>{
     }
 
     pub open spec fn remove_edges_from(self, parent:usize) -> Self{
-        let node = self.nodes[parent];
-        let new_node = NodeAbs{
-            id : node.id,
-            child : seq![],
-            val : node.val,
-        };
-        Self{
-            nodes : self.nodes.insert(parent, new_node)
+        if self.contains(parent){
+            let node = self.nodes[parent];
+            let new_node = NodeAbs{
+                id : node.id,
+                child : seq![],
+                val : node.val,
+            };
+            Self{
+                nodes : self.nodes.insert(parent, new_node)
+            }
+        }
+        else {
+            self
         }
     }
 }
@@ -411,18 +428,49 @@ impl<T> AbsTree<T>{
         requires self.has_path(x, y)
         ensures self.contains(x), self.contains(y)
     {
-        admit() //doable
+        let i = choose |i:int| self.has_path_i(x, y, i);
+        self.has_path_i_ensures(x, y, i);
+    }
+
+    proof fn has_path_i_ensures(self, x:usize, y:usize, i:int)
+        requires self.has_path_i(x, y, i)
+        ensures self.contains(x), self.contains(y)
+        decreases i
+    {
+        if i == 1 {}
+        else {
+            let z = choose |z:usize| self.is_parent_of(x, z) && self.has_path_i(z, y, i-1);
+            self.has_path_i_ensures(z, y, i-1)
+        }
     }
 
     pub proof fn lemma_path_trans(self, x:usize, y:usize, z:usize)
         requires
-            self.wf(), //can be weaker ?
             self.has_path(x, y),
             self.has_path(y, z),
         ensures
             self.has_path(x, z),
     {
-        admit() //doable
+        let i = choose |i:int| self.has_path_i(x, y, i);
+        let j = choose |j:int| self.has_path_i(y, z, j);
+        self.lemma_has_path_i_trans(x, y, z, i, j)
+    }
+
+    proof fn lemma_has_path_i_trans(self, x:usize, y:usize, z:usize, i:int, j:int)
+        requires
+            self.has_path_i(x, y, i),
+            self.has_path_i(y, z, j),
+        ensures
+            self.has_path_i(x, z, i + j)
+        decreases i
+    {
+        if i == 1 {}
+        else if i > 1 {
+            let w = choose |w:usize| self.is_parent_of(x, w) && self.has_path_i(w, y, i-1);
+            assert(self.has_path_i(w, z, i - 1 + j)) by {
+                self.lemma_has_path_i_trans(w, y, z, i-1, j)
+            }
+        }
     }
 
     pub proof fn lemma_path_contradict(self, x:usize, y:usize, z:usize)
@@ -460,7 +508,33 @@ impl<T> AbsTree<T>{
         ensures
             #[trigger]self.has_path(x, y)
     {
-        admit() // doable
+        assert(self.has_path_i(x, y, 1))
+    }
+
+    pub proof fn lemma_has_path_i_ensures(self, x:usize, y:usize, i:int)
+        requires
+            self.has_path_i(x, y, i)
+        ensures
+            i >= 1,
+            i == 1 ==> self.is_parent_of(x, y),
+            i > 1 ==>
+                exists |z:usize| self.has_path_i(x, z, i-1) && self.is_parent_of(z, y)
+        decreases i
+    {
+        if i > 1 {
+            let z = choose |z:usize| self.is_parent_of(x, z) && self.has_path_i(z, y, i-1);
+            if i == 2{
+                assert(self.is_parent_of(z, y));
+                assert(self.has_path_i(x, z, 1));
+            }
+            else {
+                self.lemma_has_path_i_ensures(z, y, i-1);
+                let w = choose |w:usize|
+                    self.has_path_i(z, w, i-2) && self.is_parent_of(w, y);
+                assert(self.is_parent_of(x, z));
+                assert(self.has_path_i(x, w, i-1))
+            }
+        }
     }
 
     pub proof fn lemma_has_path_ensures(self, x:usize, y:usize)
@@ -469,18 +543,25 @@ impl<T> AbsTree<T>{
         ensures
             self.contains(x),
             self.contains(y),
-
             self.is_parent_of(x, y)
             ||
             (
                 exists |z:usize| self.has_path(x, z) && self.is_parent_of(z, y)
-                
                 &&
-
                 exists |z:usize| self.is_parent_of(x, z) && self.has_path(z, y)
             )
     {
-        admit() //doable
+        self.has_path_ensures(x, y);
+        let i = choose |i:int| self.has_path_i(x, y, i);
+        if i == 1 {
+            assert(self.is_parent_of(x, y))
+        }
+        else {
+            let z = choose |z:usize| self.is_parent_of(x, z) && self.has_path_i(z, y, i-1);
+            assert(self.has_path_i(z, y, i-1));
+            assert(self.has_path(z, y));
+            self.lemma_has_path_i_ensures(x, y, i)
+        }
     }
 }
 
@@ -534,6 +615,8 @@ impl<T> AbsTree<T>{
 
 // lemmas about path and tree operation
 impl<T> AbsTree<T>{
+
+    // for remove_node
     pub proof fn lemma_remove_node_path0(self, id:usize)
         requires
             self.wf(),
@@ -643,7 +726,6 @@ impl<T> AbsTree<T>{
         }
     }
 
-
     pub proof fn lemma_remove_node_path(self, id:usize)
         requires
             self.wf()
@@ -658,40 +740,170 @@ impl<T> AbsTree<T>{
                 #[trigger]self.remove_node(id).has_path(x, y)
                 ==> self.has_path(x, y)    
     {
-        admit() // doable
+        assert forall |x:usize, y:usize|
+            x != id && y != id &&
+            !self.has_path(id, y) &&
+            self.has_path(x, y) implies 
+            #[trigger]self.remove_node(id).has_path(x, y) by
+        {
+            let i = choose |i:int| self.has_path_i(x, y, i);
+            self.lemma_remove_node_path_i_1(id, x, y, i);
+        }
 
-        // induction on the length of path
-
-        // !self.has_path(id, y)
-        // x != id, y != id
-         
-        // self.has_path(x, y) ==> self.has_path(x, z) && self.is_parent_of(z, y)
-
-        // z != id ?    if z == id then self.is_parent_of(id, y) contradictory
-        // so z != id
-
-        // self.has_path(id, z) ??
-        // if self.has_path(id, z) then by transitivity, self.has_path(id, y) contradictory
-        // so !self.has_path(id, z)
-        
-        // by induction, we get : post.has_path(x, z)
-
-        // by the previous lemma, we get : post.is_parent_of(z, y)
-
-        // so post.has_path(x, y)
+        assert forall |x:usize, y:usize|
+            #[trigger]self.remove_node(id).has_path(x, y)
+            implies self.has_path(x, y) by
+        {
+            let i = choose |i:int| self.remove_node(id).has_path_i(x, y, i);
+            self.lemma_remove_node_path_i_2(id, x, y, i);
+        }
     }
 
-    pub proof fn lemma_revoke_path1(self, id:usize)
+    proof fn lemma_remove_node_path_i_1(self, id:usize, x:usize, y:usize, i:int)
+        requires
+            self.wf(),
+            x != id,
+            y != id,
+            !self.has_path(id, y),
+            self.has_path_i(x, y, i)
+        ensures
+            self.remove_node(id).has_path(x, y),
+        decreases i
+    {
+        let post = self.remove_node(id);
+        if i == 1 {
+            assert(post.is_parent_of(x, y)) by {
+                self.lemma_remove_node_path0(id);
+            }
+            assert(post.has_path_i(x, y, 1))
+        }
+        else {
+            let z = choose |z:usize| self.is_parent_of(x, z) && self.has_path_i(z, y, i-1);
+            assert(self.has_path_i(z, y, i-1));
+            assert(z != id);
+            assert(post.is_parent_of(x, z)) by {
+                self.lemma_remove_node_path0(id);
+            }
+            assert(post.has_path(z, y)) by {
+                self.lemma_remove_node_path_i_1(id, z, y, i-1)
+            }
+            assert(post.has_path(x, z)) by {
+                post.lemma_parent_to_path(x, z)
+            }
+            post.lemma_path_trans(x, z, y)
+        }
+    }
+
+    proof fn lemma_remove_node_path_i_2(self, id:usize, x:usize, y:usize, i:int)
+        requires
+            self.wf(),
+            self.remove_node(id).has_path_i(x, y, i),
+        ensures
+            self.has_path(x, y)
+        decreases i
+    {
+        if i == 1 {
+            assert(self.is_parent_of(x, y)) by {
+                self.lemma_remove_node_path0(id)
+            }
+            self.lemma_parent_to_path(x, y)
+        }
+        else{
+            let post = self.remove_node(id);
+            let z = choose|z:usize| post.is_parent_of(x, z) && post.has_path_i(z, y, i-1);
+            assert(self.is_parent_of(x, z)) by{
+                self.lemma_remove_node_path0(id)
+            } 
+            self.lemma_parent_to_path(x, z);
+            assert(self.has_path(z, y)) by{
+                self.lemma_remove_node_path_i_2(id, z, y, i-1);
+            }
+            self.lemma_path_trans(x, z, y)
+        }
+    }
+
+
+    // for revoke
+    pub proof fn lemma_revoke_path0(self, id:usize)
         requires self.wf(),
         ensures
             forall |x:usize, y:usize| #[trigger]self.revoke(id).has_path(x, y) ==> self.has_path(x, y),
             forall |x:usize, y:usize| #[trigger]self.revoke(id).is_parent_of(x, y) ==> self.is_parent_of(x, y),
     {
-        admit() // easy, induction on des.len()
+        assert forall |x:usize, y:usize| #[trigger]self.revoke(id).has_path(x, y)
+            implies self.has_path(x, y) by
+        {
+            self.lemma_descendants(id);
+            self.lemma_revoke_path0_aux_2(x, y, self.descendants(id).to_seq());
+        }
+
+        assert forall |x:usize, y:usize| #[trigger]self.revoke(id).is_parent_of(x, y)
+            implies self.is_parent_of(x, y) by
+        {
+            self.lemma_descendants(id);
+            self.lemma_revoke_path0_aux_1(x, y, self.descendants(id).to_seq());
+        }
     }
 
+    proof fn lemma_revoke_path0_aux_1(self, x:usize, y:usize, seq:Seq<usize>)
+        requires
+            self.wf(),
+            seq.fold_left(self, |b:Self, a:usize| b.remove_node(a)).is_parent_of(x, y),
+        ensures
+            self.is_parent_of(x, y),
+        decreases seq.len()
+    {
+        if seq.len() > 0 {
+            let seq1 = seq.drop_last();
+            let last = seq.last();
+            let res = seq.fold_left(self, |b:Self, a:usize| b.remove_node(a));
+            let res1 = seq1.fold_left(self, |b:Self, a:usize| b.remove_node(a));
+            assert(res1.wf()) by{
+                assert forall |b:Self, a:usize| b.wf() implies #[trigger]b.remove_node(a).wf() by{
+                    b.lemma_remove_node_wf(a)
+                }
+                crate::fold::lemma_fold_left_preserves_inv(
+                    seq1, |b:Self, a:usize| b.remove_node(a), self, |b:Self| b.wf()
+                )
+            }
+            assert(res == res1.remove_node(last));
+            assert(res1.is_parent_of(x, y)) by {
+                res1.lemma_remove_node_path0(last)
+            }
+            self.lemma_revoke_path0_aux_1(x, y, seq1)
+        }
+    }
 
-    pub proof fn lemma_revoke_path2(self, id:usize)
+    proof fn lemma_revoke_path0_aux_2(self, x:usize, y:usize, seq:Seq<usize>)
+        requires
+            self.wf(),
+            seq.fold_left(self, |b:Self, a:usize| b.remove_node(a)).has_path(x, y),
+        ensures
+            self.has_path(x, y),
+        decreases seq.len()
+    {
+        if seq.len() > 0 {
+            let seq1 = seq.drop_last();
+            let last = seq.last();
+            let res = seq.fold_left(self, |b:Self, a:usize| b.remove_node(a));
+            let res1 = seq1.fold_left(self, |b:Self, a:usize| b.remove_node(a));
+            assert(res1.wf()) by{
+                assert forall |b:Self, a:usize| b.wf() implies #[trigger]b.remove_node(a).wf() by{
+                    b.lemma_remove_node_wf(a)
+                }
+                crate::fold::lemma_fold_left_preserves_inv(
+                    seq1, |b:Self, a:usize| b.remove_node(a), self, |b:Self| b.wf()
+                )
+            }
+            assert(res == res1.remove_node(last));
+            assert(res1.has_path(x, y)) by {
+                res1.lemma_remove_node_path(last)
+            }
+            self.lemma_revoke_path0_aux_2(x, y, seq1)
+        }
+    }
+
+    proof fn lemma_revoke_path2(self, id:usize)
         requires
             self.wf()
         ensures
@@ -748,8 +960,7 @@ impl<T> AbsTree<T>{
         }
     }
 
-
-    pub proof fn lemma_revoke_path22(self, id:usize)
+    pub proof fn lemma_revoke_path(self, id:usize)
         requires
             self.wf()
         ensures
@@ -759,25 +970,53 @@ impl<T> AbsTree<T>{
                 self.has_path(x, y) ==>
                 #[trigger]self.revoke(id).has_path(x, y),
     {
-        admit() //doable
-
-        // induction on path len
-
-        // x != id, !self.has_path(id, y)
-        // self.has_path(x, y)
-
-        // ==> self.has_path(x, z) && self.is_parent_of(z, y)
-
-        // if self.has_path(id, z) then by transitivity, ==> self.has_path(id, y) contradictory
-        // so !self.has_path(id, z)
-
-        // by induction ==> self.has_path(x, z)
-
-        // by lemma_revoke_path2 ==> self.is_parent_of(z, y)
-
-        // thus self.has_path(x, y)
+        assert forall |x:usize, y:usize|
+            x != id &&
+            !self.has_path(id, y) &&
+            self.has_path(x, y) implies
+            #[trigger]self.revoke(id).has_path(x, y) by
+        {
+            let i = choose |i:int| self.has_path_i(x, y, i);
+            self.lemma_revoke_path_i(id, x, y, i);
+        }
     }
 
+    proof fn lemma_revoke_path_i(self, id:usize, x:usize, y:usize, i:int)
+        requires
+            self.wf(),
+            x != id,
+            ! self.has_path(id, y),
+            self.has_path_i(x, y, i),
+        ensures
+            self.revoke(id).has_path(x, y),
+        decreases i
+    {
+        if i == 1 {
+            assert(self.revoke(id).is_parent_of(x, y)) by {
+                self.lemma_revoke_path2(id)
+            }
+            self.revoke(id).lemma_parent_to_path(x, y)
+        }
+        else {
+            let z = choose |z:usize| self.is_parent_of(x, z) && self.has_path_i(z, y, i-1);
+            assert(z != id);
+            assert(!self.has_path(id, z)) by {
+                if self.has_path(id, z) {
+                    assert(self.has_path(z, y));
+                    self.lemma_path_trans(id, z, y);
+                }
+            }
+            assert(self.revoke(id).is_parent_of(x, z)) by {
+                self.lemma_revoke_path2(id)
+            }
+            self.revoke(id).lemma_parent_to_path(x, z);
+            self.lemma_revoke_path_i(id, z, y, i-1);
+            self.revoke(id).lemma_path_trans(x, z, y)
+        }
+    }
+
+
+    // for remove_one_edge
     pub proof fn lemma_remove_one_edge_path0(self, parent:usize, child:usize)
         requires
             self.wf(),
@@ -786,11 +1025,10 @@ impl<T> AbsTree<T>{
                 #[trigger]self.remove_one_edge(parent, child).is_parent_of(x, y)
                 ==> self.is_parent_of(x, y),
             forall |x:usize, y:usize|
-                x != child && y != child &&
+                y != child &&
                 self.is_parent_of(x, y) ==>
                 #[trigger]self.remove_one_edge(parent, child).is_parent_of(x, y),
     {
-
         assert forall |x:usize, y:usize|
             #[trigger]self.remove_one_edge(parent, child).is_parent_of(x, y)
             implies self.is_parent_of(x, y) by
@@ -805,9 +1043,8 @@ impl<T> AbsTree<T>{
             }
         }
 
-
         assert forall |x:usize, y:usize|
-            x != child && y != child &&
+            y != child &&
             self.is_parent_of(x, y) implies
             #[trigger]self.remove_one_edge(parent, child).is_parent_of(x, y) by
         {
@@ -824,7 +1061,6 @@ impl<T> AbsTree<T>{
                 if x != parent {}
                 else {
                     assert(self.is_parent_of(parent, y));
-                    assert(parent != child);
                     assert(y != child);
                     let old_child = self.nodes[parent].child;
                     let new_child = post.nodes[parent].child;
@@ -901,7 +1137,6 @@ impl<T> AbsTree<T>{
         }
     }
 
-
     pub proof fn lemma_remove_one_edge_path(self, parent:usize, child:usize)
         requires
             self.wf(),
@@ -916,10 +1151,79 @@ impl<T> AbsTree<T>{
                 self.has_path(x, y) ==>
                 #[trigger]self.remove_one_edge(parent, child).has_path(x, y),
     {
-        admit() // by induction on path x y
+        assert forall |x:usize, y:usize|
+            #[trigger]self.remove_one_edge(parent, child).has_path(x, y)
+            implies self.has_path(x, y) by
+        {
+            let i = choose |i:int| self.remove_one_edge(parent, child).has_path_i(x, y, i);
+            self.lemma_remove_one_edge_path_aux_1(parent, child, x, y, i)
+        }
+
+        assert forall |x:usize, y:usize|
+            x != child && y != child &&
+            !self.has_path(child, y) &&
+            self.has_path(x, y) implies 
+            #[trigger]self.remove_one_edge(parent, child).has_path(x, y) by
+        {
+            let i = choose |i:int| self.has_path_i(x, y, i);
+            self.lemma_remove_one_edge_path_aux_2(parent, child, x, y, i)
+        }
     }
 
+    proof fn lemma_remove_one_edge_path_aux_1(self, parent:usize, child:usize, x:usize, y:usize, i:int)
+        requires
+            self.wf(),
+            self.remove_one_edge(parent, child).has_path_i(x, y, i)
+        ensures
+            self.has_path(x, y),
+        decreases i
+    {
+        let post = self.remove_one_edge(parent, child);
+        if i == 1 {
+            assert(self.is_parent_of(x, y)) by {
+               self.lemma_remove_one_edge_path0(parent, child)
+            }
+            self.lemma_parent_to_path(x, y)
+        }
+        else {
+            let z = choose |z:usize| post.is_parent_of(x, z) && post.has_path_i(z, y, i-1);
+            assert(self.is_parent_of(x, z)) by {
+               self.lemma_remove_one_edge_path0(parent, child)
+            }
+            self.lemma_parent_to_path(x, z);
+            self.lemma_remove_one_edge_path_aux_1(parent, child, z, y, i-1);
+            self.lemma_path_trans(x, z, y);
+        }
+    }
 
+    proof fn lemma_remove_one_edge_path_aux_2(self, parent:usize, child:usize, x:usize, y:usize, i:int)
+        requires
+            self.wf(),
+            x != child,
+            y != child,
+            !self.has_path(child, y),
+            self.has_path_i(x, y, i),
+        ensures
+            self.remove_one_edge(parent, child).has_path(x, y),
+        decreases i
+    {
+        let post = self.remove_one_edge(parent, child);
+        if i == 1 {
+            assert(post.is_parent_of(x, y)) by {
+               self.lemma_remove_one_edge_path0(parent, child)
+            }
+            post.lemma_parent_to_path(x, y)
+        }
+        else {
+            let z = choose |z:usize| self.is_parent_of(x, z) && self.has_path_i(z, y, i-1);
+            assert(post.is_parent_of(x, z)) by {
+               self.lemma_remove_one_edge_path0(parent, child)
+            }
+            post.lemma_parent_to_path(x, z);
+            self.lemma_remove_one_edge_path_aux_2(parent, child, z, y, i-1);
+            post.lemma_path_trans(x, z, y);
+        }
+    }
 }   
 
 
@@ -999,7 +1303,7 @@ impl<T> AbsTree<T>{
                     assert(self.revoke(id).has_path(id, e)) by {
                         self.revoke(id).lemma_parent_to_path(id, e);
                     }
-                    self.lemma_revoke_path1(id)
+                    self.lemma_revoke_path0(id)
                 }
                 assert(self.revoke(id).dom() =~= self.dom() - self.descendants(id));
                 assert(self.descendants(id).contains(e));
@@ -1012,7 +1316,7 @@ impl<T> AbsTree<T>{
                 let e = self.revoke(id).descendants(id).choose();
                 assert(self.revoke(id).has_path(id, e));
                 assert(self.has_path(id, e)) by {
-                    self.lemma_revoke_path1(id)
+                    self.lemma_revoke_path0(id)
                 }
                 assert(self.revoke(id).contains(e)) by { self.revoke(id).has_path_ensures(id, e)}
                 assert(self.revoke(id).dom() =~= self.dom() - self.descendants(id));
@@ -1104,7 +1408,7 @@ impl<T> AbsTree<T>{
 
 
 impl<T> AbsTree<T>{
-    pub proof fn lemma_001(self, id:usize)
+    pub proof fn lemma_remove_free_node(self, id:usize)
         requires
             self.wf(),
             self.contains(id),
@@ -1139,7 +1443,7 @@ impl<T> AbsTree<T>{
     }
 
     #[verifier::spinoff_prover]
-    pub proof fn lemma_remove_one_edge_remove_edges_to(self, parent:usize, child:usize)
+    pub proof fn lemma_remove_one_edge_eqv_remove_edges_to(self, parent:usize, child:usize)
         requires
             self.wf(),
             self.is_parent_of(parent, child),
@@ -1229,11 +1533,11 @@ impl<T> AbsTree<T>{
                     }
                 }
             }
-            Self::lemma_remove_one_edge_remove_edges_to_aux(seq0, nodes, child)
+            Self::lemma_remove_one_edge_eqv_remove_edges_to_aux(seq0, nodes, child)
         }
     }
 
-    proof fn lemma_remove_one_edge_remove_edges_to_aux(
+    proof fn lemma_remove_one_edge_eqv_remove_edges_to_aux(
         s:Seq<usize>,
         nodes : Map<usize, NodeAbs<T>>,
         child : usize,
@@ -1263,7 +1567,7 @@ impl<T> AbsTree<T>{
                     assert(nodes.contains_key(s[j]));
                     assert(!nodes[s[j]].child.contains(child)) 
                 }
-                Self::lemma_remove_one_edge_remove_edges_to_aux(s0, nodes, child)
+                Self::lemma_remove_one_edge_eqv_remove_edges_to_aux(s0, nodes, child)
             };
             let r = f(nodes, last);
             assert(r =~= nodes) by {
@@ -1695,14 +1999,14 @@ impl<T> AbsTree<T>{
                     self.lemma_path_cross(i, j, x)
                 }
             }
-            self.lemma_revoke_path22(i);
+            self.lemma_revoke_path(i);
         }
         assert(self.descendants(j).subset_of(self.revoke(i).descendants(j)));
 
         assert forall |x:usize| #[trigger]self.revoke(i).has_path(j, x) implies
             self.has_path(j, x) by
         {
-            self.lemma_revoke_path1(i)
+            self.lemma_revoke_path0(i)
         }
         assert(self.revoke(i).descendants(j).subset_of(self.descendants(j)));
     }
@@ -1724,7 +2028,7 @@ impl<T> AbsTree<T>{
         assert(self.descendants(j).subset_of(self.descendants(i)));
         assert forall |x:usize| #[trigger]self.revoke(j).has_path(i, x) implies self.has_path(i, x) by
         {
-            self.lemma_revoke_path1(j)
+            self.lemma_revoke_path0(j)
         }
         assert(self.revoke(j).descendants(i).subset_of(self.descendants(i)));
         assert((self.revoke(j).descendants(i) + self.descendants(j)).subset_of(self.descendants(i)));
@@ -1733,12 +2037,10 @@ impl<T> AbsTree<T>{
         assert forall |x:usize| self.has_path(i, x) && !self.has_path(j, x) implies
             #[trigger]self.revoke(j).has_path(i, x)
         by{
-            self.lemma_revoke_path22(j);
+            self.lemma_revoke_path(j);
         }
         assert(self.descendants(i).subset_of(self.revoke(j).descendants(i) + self.descendants(j)));
     } 
-
-
 
     proof fn lemma_path_cross(self, x:usize, y:usize, z:usize)
         requires
@@ -1749,8 +2051,51 @@ impl<T> AbsTree<T>{
         ensures
             self.has_path(x, y) || self.has_path(y, x)
     {
-        admit()
-        // prove by induction on the length of path
+        let i = choose |i:int| self.has_path_i(x, z, i);
+        self.lemma_path_cross_i(x, y, z, i)
+    }
+
+    proof fn lemma_path_cross_i(self, x:usize, y:usize, z:usize, i:int)
+        requires
+            self.wf(),
+            self.has_path_i(x, z, i),
+            self.has_path(y, z),
+            x != y,
+        ensures
+            self.has_path(x, y) || self.has_path(y, x)
+        decreases i
+    {
+        if i == 1 {
+            assert(self.is_parent_of(x, z));
+            self.lemma_has_path_ensures(y, z);
+            assert(!self.is_parent_of(y, z));
+            self.lemma_has_path_ensures(y, z);
+            let w = choose |w:usize| self.has_path(y, w) && self.is_parent_of(w, z);
+            assert(self.is_parent_of(w, z));
+            assert(w == x);
+            assert(self.has_path(y, x));
+        }
+        else {
+            let v = choose |v:usize| self.is_parent_of(x, v) && self.has_path_i(v, z, i-1);
+
+            assert(self.is_parent_of(x, v));
+            if v == y {
+                self.lemma_parent_to_path(x, y)
+            }
+            else {
+                assert(self.has_path(v, z));
+                self.lemma_path_cross_i(v, y, z, i-1);
+                if self.has_path(v, y) {
+                    self.lemma_parent_to_path(x, v);
+                    self.lemma_path_trans(x, v, y);
+                }
+                else {
+                    assert(self.has_path(y, v));
+                    self.lemma_path_cross_i(x, y, v, 1);
+                }
+            }
+
+        }
     }
 
 
@@ -2140,9 +2485,45 @@ impl<T> AbsTree<T>{
             forall |x:usize, y:usize|
                 #[trigger]self.remove_edges_from(id).has_path(x, y) ==> self.has_path(x, y)
     {
-        admit()
+        assert forall |x:usize, y:usize|
+            #[trigger]self.remove_edges_from(id).has_path(x, y) implies self.has_path(x, y) by
+        {
+            if self.contains(id){
+                self.remove_edges_from_eqv_fold_remove_edge(id);
+                self.lemma_remove_edges_from_path_aux(id, x, y, self.childs_seq(id));
+            }
+        }
     }
 
+    proof fn lemma_remove_edges_from_path_aux(self, id:usize, x:usize, y:usize, seq:Seq<usize>)
+        requires
+            self.wf(),
+            seq.fold_left(self, |b:Self, a:usize| b.remove_one_edge(id, a)).has_path(x, y)
+        ensures
+            self.has_path(x, y),
+        decreases seq.len()
+    {   
+        if seq.len() > 0{
+            let last = seq.last();
+            let seq1 = seq.drop_last();
+            let f = |b:Self, a:usize| b.remove_one_edge(id, a);
+            let res = seq.fold_left(self, f);
+            let res1 = seq1.fold_left(self, f);
+            assert(res == res1.remove_one_edge(id, last));
+            assert(res1.wf()) by {
+                assert forall |b:Self, a:usize| b.wf() implies #[trigger] f(b, a).wf() by{
+                    b.lemma_remove_one_edge_wf(id, a)
+                }
+                crate::fold::lemma_fold_left_preserves_inv(
+                    seq1, f, self, |b:Self| b.wf()
+                )
+            }
+            assert(res1.has_path(x, y)) by {
+                res1.lemma_remove_one_edge_path(id, last)
+            }
+            self.lemma_remove_edges_from_path_aux(id, x, y, seq1)
+        }
+    }
 
     pub proof fn lemma_remove_edges_from_ensures(self, id:usize)
         requires
@@ -2175,7 +2556,7 @@ impl<T> AbsTree<T>{
         let r1 = self.remove_edges_to(child);
         let r2 = self.remove_one_edge(parent, child);
         assert(r1 =~= r2) by {
-            self.lemma_remove_one_edge_remove_edges_to(parent, child);
+            self.lemma_remove_one_edge_eqv_remove_edges_to(parent, child);
         }
         let res1 = r2.remove_node(child);
         let res2 = self.remove_node(child);
@@ -2190,6 +2571,11 @@ impl<T> AbsTree<T>{
 
 
 // the main lemma used in `IndexTree::<T>::revoke`
+// prove that : 
+//     self ---remove_edges_from(id)--->
+//          ---revoke_and_remove_self(child) for each child of id in the original tree
+//     <==>
+//     self --- revoke(id)
 impl<T> AbsTree<T>{
     pub proof fn main_lemma(self, id:usize)
         requires
@@ -2326,12 +2712,12 @@ impl<T> AbsTree<T>{
                 self.revoke(id)
             )
             by {
-                self.lemma_aux_999(id, child1)
+                self.lemma_remove_one_edge_and_revoke(id, child1)
             }
         }
     }
 
-    proof fn lemma_aux_999(self, id:usize, child:usize)
+    proof fn lemma_remove_one_edge_and_revoke(self, id:usize, child:usize)
         requires
             self.wf(),
             self.is_parent_of(id, child),
@@ -2342,8 +2728,8 @@ impl<T> AbsTree<T>{
             =~=
             self.revoke(id)
     {
-        self.lemma_aux_99(id, child);
-        self.lemma_aux_9(id, child);
+        self.lemma_remove_one_edge_child_des(id, child);
+        self.lemma_remove_one_edge_des(id, child);
 
         let des1 = self.descendants(child);
         assert(des1 =~= self.remove_one_edge(id, child).descendants(child));
@@ -2384,13 +2770,13 @@ impl<T> AbsTree<T>{
 
         assert(s0.revoke(id).descendants(child) =~= s0.descendants(child)) by{
             assert(s0.revoke(id).descendants(child).subset_of(s0.descendants(child))) by{
-                s0.lemma_revoke_path1(id);
+                s0.lemma_revoke_path0(id);
             }
             assert(s0.descendants(child).subset_of(s0.revoke(id).descendants(child))) by{
                 assert forall |y:usize|
                     s0.has_path(child, y) implies #[trigger] s0.revoke(id).has_path(child, y)
                 by{
-                    s0.lemma_revoke_path22(id);
+                    s0.lemma_revoke_path(id);
                     assert(child != id) by {
                         if child == id {
                             assert(self.is_parent_of(id, id));
@@ -2591,7 +2977,7 @@ impl<T> AbsTree<T>{
         }
     }
 
-    proof fn lemma_aux_99(self, id:usize, child:usize)
+    proof fn lemma_remove_one_edge_child_des(self, id:usize, child:usize)
         requires
             self.wf(),
             self.is_parent_of(id, child),
@@ -2606,12 +2992,12 @@ impl<T> AbsTree<T>{
             assert forall |y:usize| self.has_path(child, y) implies
                 #[trigger] self.remove_one_edge(id, child).has_path(child, y) by
             {
-                self.lemma_aux_99_99(id, child, y)
+                self.lemma_remove_one_edge_path_child(id, child, y)
             }
         }
     }
 
-    proof fn lemma_aux_99_99(self, id:usize, child:usize, y:usize)
+    proof fn lemma_remove_one_edge_path_child(self, id:usize, child:usize, y:usize)
         requires
             self.wf(),
             self.is_parent_of(id, child),
@@ -2619,11 +3005,90 @@ impl<T> AbsTree<T>{
         ensures
             self.remove_one_edge(id, child).has_path(child, y)
     {
-        admit()
+        let i = choose |i:int| self.has_path_i(child, y, i);
+        self.lemma_remove_one_edge_path_child_aux_2(id, child, y, i);
         // prove by induction on length of path
     }
 
-    proof fn lemma_aux_9(self, id:usize, child:usize)
+    proof fn lemma_remove_one_edge_path_child_aux_1(self, parent:usize, child:usize, x:usize, y:usize, i:int)
+        requires
+            self.wf(),
+            self.is_parent_of(parent, child),
+            self.has_path(child, x),
+            self.has_path_i(x, y, i),
+        ensures
+            self.remove_one_edge(parent, child).has_path(x, y)
+        decreases i
+    {
+        let post = self.remove_one_edge(parent, child);
+
+        if i == 1 {
+            assert(self.is_parent_of(x, y));
+            assert(y != child) by {
+                if y == child{
+                    self.lemma_path_trans(child, x, child);
+                }
+            }
+            assert(post.is_parent_of(x, y)) by{
+                self.lemma_remove_one_edge_path0(parent, child)
+            }
+            post.lemma_parent_to_path(x, y)
+        }
+        else {
+            let z = choose |z:usize|
+                self.is_parent_of(x, z) && self.has_path_i(z, y, i-1);
+            
+            assert(self.has_path(x, z)) by { self.lemma_parent_to_path(x, z) }
+            assert(self.has_path(child, z)) by { self.lemma_path_trans(child, x, z)}
+            assert(post.has_path(z, y)) by {
+                self.lemma_remove_one_edge_path_child_aux_1(parent, child, z, y, i-1)
+            }
+            assert(post.has_path(x, z)) by {
+                self.lemma_remove_one_edge_path_child_aux_1(parent, child, x, z, 1)
+            }
+            post.lemma_path_trans(x, z, y)
+        }
+    }
+
+    proof fn lemma_remove_one_edge_path_child_aux_2(self, id:usize, child:usize, y:usize, i:int)
+        requires
+            self.wf(),
+            self.is_parent_of(id, child),
+            self.has_path_i(child, y, i),
+        ensures
+            self.remove_one_edge(id, child).has_path(child, y)
+        decreases i
+    {
+        assert(id != child) by {
+            if id == child {
+                self.lemma_parent_to_path(id, id)
+            }
+        }
+        let post = self.remove_one_edge(id, child);
+        if i == 1 {
+            assert(self.is_parent_of(child, y));
+            assert(post.nodes[child] =~= self.nodes[child]);
+            assert(post.is_parent_of(child, y));
+            post.lemma_parent_to_path(child, y)
+        }        
+        else {
+            self.lemma_has_path_i_ensures(child, y, i);
+            let z = choose |z:usize| self.has_path_i(child, z, i-1) && self.is_parent_of(z, y);
+
+            assert(post.has_path(child, z)) by {
+                self.lemma_remove_one_edge_path_child_aux_2(id, child, z, i-1);
+            }
+            assert(self.has_path(z, y)) by{
+                self.lemma_parent_to_path(z, y)
+            }
+            assert(post.has_path(z, y)) by {
+                self.lemma_remove_one_edge_path_child_aux_1(id, child, z, y, 1)
+            }
+            post.lemma_path_trans(child, z, y);
+        }
+    }
+
+    proof fn lemma_remove_one_edge_des(self, id:usize, child:usize)
         requires
             self.wf(),
             self.is_parent_of(id, child),
@@ -2658,7 +3123,7 @@ impl<T> AbsTree<T>{
             {
                 self.lemma_path_trans(id, child, y)
             }
-            self.lemma_aux_99(id, child);
+            self.lemma_remove_one_edge_child_des(id, child);
             assert(self.remove_one_edge(id, child).descendants(child).subset_of(self.descendants(id)));
         }
 
@@ -2671,7 +3136,7 @@ impl<T> AbsTree<T>{
 
                 if self.has_path(child, y) {
                     assert(post.has_path(child, y)) by {
-                        self.lemma_aux_99_99(id, child, y)
+                        self.lemma_remove_one_edge_path_child(id, child, y)
                     }
                 }
                 else {
@@ -2689,7 +3154,6 @@ impl<T> AbsTree<T>{
             }
         }    
     }
-
 }
 
 

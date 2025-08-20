@@ -57,7 +57,7 @@
 //             =~= self.descendants(parent) - self.descendants(child)
 //     {
 //         let post = self.revoke(child);
-//         self.lemma_revoke_path1(child);
+//         self.lemma_revoke_path0(child);
 //         self.lemma_revoke_ensures(child);
 
 //         assert forall |e:usize|
@@ -85,7 +85,7 @@
 //             assert(!self.has_path(child, e));
 //             assert(parent != child);
 //             assert(post.has_path(parent, e)) by{
-//                 self.lemma_revoke_path22(child);
+//                 self.lemma_revoke_path(child);
 //             }
 //         }
 //     }
@@ -334,7 +334,7 @@
 //         assert(!r1.has_path(id, child)) by{
 //             if r1.has_path(id, child) {
 //                 assert(self.has_path(id, child)) by{
-//                     self.lemma_revoke_path1(id)
+//                     self.lemma_revoke_path0(id)
 //                 }
 //             }
 //         }
