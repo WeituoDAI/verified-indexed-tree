@@ -3,7 +3,10 @@ mod set;
 mod cdtheap2;
 mod exec;
 mod types;
+mod test;
+
+
 
 fn main(){
-    // cdtheap2::test();
+    test::test();
 }
