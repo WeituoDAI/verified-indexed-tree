@@ -3157,4 +3157,131 @@ impl<T> AbsTree<T>{
 }
 
 
+// measure, used to define well-formed recursive fn
+impl<T> AbsTree<T>{
+    pub closed spec fn all_edges(self) -> Set<(usize, usize)>{
+        Set::new(|e: (usize, usize)| self.is_parent_of(e.0, e.1))
+    }
+
+    pub closed spec fn measure(self) -> nat{
+        self.all_edges().len()
+    }
+
+    pub proof fn lemma_measure_finite(self)
+        requires self.finite()
+        ensures self.all_edges().finite()
+    {
+        let s = crate::set::product_set(self.dom(), self.dom());
+        assert(s.finite()) by { crate::set::lemma_product_set_finite(self.dom(), self.dom())}
+        assert(self.all_edges().subset_of(s));
+    }
+
+
+    // prove that tree operations defined above will decrease the measure
+
+    pub proof fn lemma_remove_one_edge_measure(self, parent:usize, child:usize)
+        requires
+            self.wf(),
+        ensures
+            self.is_parent_of(parent, child) ==>
+                self.remove_one_edge(parent, child).measure() < self.measure(),
+            (!self.is_parent_of(parent, child)) ==>
+                self.remove_one_edge(parent, child).measure() == self.measure(),
+    {
+        if self.contains(parent){
+            self.nodes[parent].child.index_of_first_ensures(child);
+            let post = self.remove_one_edge(parent, child);
+            if self.is_parent_of(parent, child){
+                assert(post.all_edges().subset_of(self.all_edges())) by{
+                    self.lemma_remove_one_edge_path0(parent, child)
+                }
+                assert(self.all_edges().contains((parent, child)));
+                assert(!post.all_edges().contains((parent, child)));
+                self.lemma_measure_finite();
+                post.lemma_measure_finite();
+                post.all_edges().lemma_subset_not_in_lt(self.all_edges(), (parent, child));
+            }
+            else {
+                assert(post =~= self);
+            }
+        }
+    }
+
+    pub proof fn lemma_remove_edges_from_measure(self, id:usize)
+        requires
+            self.wf(),
+        ensures
+            !self.contains(id) ==> self.remove_edges_from(id).measure() == self.measure(),
+            self.contains(id) && self.childs_seq(id).len() == 0 ==>
+                self.remove_edges_from(id).measure() == self.measure(),
+            self.contains(id) && self.childs_seq(id).len() > 0 ==>
+                self.remove_edges_from(id).measure() < self.measure(),
+    {
+        if self.contains(id){
+            let post = self.remove_edges_from(id);
+            if self.childs_seq(id).len() == 0 {
+                assert(self.nodes[id].child =~= seq![]);
+                assert(self =~= post);
+            }
+            else {
+                let child = self.childs_seq(id).first();
+                assert(post.all_edges().subset_of(self.all_edges())) by{
+                    self.lemma_remove_edges_from_path(id)
+                }
+                assert(self.all_edges().contains((id, child)));
+                assert(!post.all_edges().contains((id, child)));
+                self.lemma_measure_finite();
+                post.lemma_measure_finite();
+                post.all_edges().lemma_subset_not_in_lt(self.all_edges(), (id, child));
+            }
+        }
+    }
+
+    pub proof fn lemma_remove_node_measure(self, id:usize)
+        requires
+            self.wf(),
+        ensures
+            self.remove_node(id).measure() <= self.measure()                
+    {
+        if self.contains(id){
+            let post = self.remove_node(id);
+            assert(self.all_edges().finite()) by {
+                self.lemma_measure_finite()
+            }
+            assert(post.all_edges().subset_of(self.all_edges())) by{
+                self.lemma_remove_node_path0(id)
+            }
+            vstd::set_lib::lemma_len_subset(post.all_edges(), self.all_edges());
+        }
+    }
+
+    pub proof fn lemma_revoke_measure(self, id:usize)
+        requires
+            self.wf(),
+        ensures
+            self.revoke(id).measure() <= self.measure()                
+    {
+        let inv = |b:Self| b.wf() && b.measure() <= self.measure();
+        let f = |b:Self, a:usize| b.remove_node(a);
+        assert forall |b:Self, a:usize| inv(b) implies #[trigger] inv(f(b, a)) by{
+            b.lemma_remove_node_wf(a);
+            b.lemma_remove_node_measure(a)
+        }
+        crate::fold::lemma_fold_left_preserves_inv(
+            self.descendants(id).to_seq(), f, self, inv
+        )
+    }
+
+    pub proof fn lemma_revoke_and_remove_self_measure(self, id:usize)
+        requires
+            self.wf(),
+        ensures
+            self.revoke_and_remove_self(id).measure() <= self.measure()                
+    {
+        self.lemma_revoke_wf(id);
+        self.lemma_revoke_measure(id);
+        self.revoke(id).lemma_remove_node_measure(id);
+    }
+}
+
 }//verus!

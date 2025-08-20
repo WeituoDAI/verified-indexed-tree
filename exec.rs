@@ -26,8 +26,7 @@ impl<T> IndexTree<T>{
         }).unwrap()
     }
 
-
-    #[verifier::exec_allows_no_decreases_clause]
+    #[verifier::loop_isolation(false)]
     pub fn revoke(&mut self, id:usize)
         requires
             old(self)@.wf(),
@@ -35,6 +34,8 @@ impl<T> IndexTree<T>{
         ensures
             self@.wf(),
             self@ =~= old(self)@.revoke(id),
+        decreases
+            old(self)@.measure(),
     {
         let children = self.take_children(id);
 
@@ -61,11 +62,15 @@ impl<T> IndexTree<T>{
                 broadcast use AbsTree::lemma_parent_to_path;
                 old(self)@.lemma_path_contradict(id, children@[j], children@[k])
             }
-
+        }
+        // about measure
+        proof{
+            assert(children@.len() > 0 ==> self@.measure() < old(self)@.measure()) by{
+                old(self)@.lemma_remove_edges_from_measure(id)
+            }
         }
 
         let ghost prev = *self;
-
 
 
         for i in 0..children.len()
@@ -88,7 +93,9 @@ impl<T> IndexTree<T>{
                 forall |j:int, k:int| i <= j < k < children@.len() ==>
                    !#[trigger]self@.has_path(children@[j], children@[k]),
 
-            
+                //measure
+                children@.len() > 0 ==> prev@.measure() < old(self)@.measure(),
+                self@.measure() <= prev@.measure(),            
         {
             let ghost t0 = *self;
 
@@ -174,6 +181,13 @@ impl<T> IndexTree<T>{
                         }
                         t0@.lemma_path_contradict(child, p, q);
                     }
+                }
+            }
+
+            //measure
+            proof{
+                assert(self@.measure() <= t0@.measure()) by{
+                    t0@.lemma_revoke_and_remove_self_measure(child)
                 }
             }
         }
