@@ -15,37 +15,10 @@ pub proof fn lemma_set_to_seq_no_duplicates<A>(s:Set<A>)
     assert(s.remove(x).to_seq().no_duplicates()) by {
       lemma_set_to_seq_no_duplicates(s.remove(x))
     }
-    if s.remove(x).to_seq().contains(x) {
-      lemma_set_to_seq_contains_2(s.remove(x), x);
-      assert(false);
-    }
+    s.remove(x).lemma_to_seq_to_set_id()
   }
 }
 
-proof fn lemma_set_to_seq_contains_2<T>(s:Set<T>, v:T)
-	requires
-    s.finite(),
-    s.to_seq().contains(v),
-	ensures
-		s.contains(v)
-	decreases
-		s.len()
-{
-	if s.len() == 0{}
-	else {
-    let i0 = choose |i:int| s.to_seq()[i] == v && 0 <= i < s.to_seq().len();
-    let v0 = choose |x:T| #[trigger]s.contains(x) &&
-          s.to_seq() =~= Seq::<T>::empty().push(x) + s.remove(x).to_seq();
-    if i0 == 0{}
-    else{
-      assert(s.to_seq()[i0] == s.remove(v0).to_seq()[i0 - 1]);
-      assert(s.remove(v0).contains(v)) by{
-        assert(s.remove(v0).to_seq().contains(v));
-        lemma_set_to_seq_contains_2(s.remove(v0), v);
-      }
-    }
-	}
-}
 
 pub proof fn lemma_no_duplicates_seq_to_set_to_multiset<A>(s1:Seq<A>, s2:Seq<A>)
   requires
