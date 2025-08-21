@@ -3,125 +3,6 @@ use vstd::prelude::*;
 verus!{
 
 
-
-proof fn lemma_fold_reverse1<A, B>(s:Seq<A>, v:B,  f:spec_fn(A, B) -> B)
-    ensures
-        s.reverse().fold_right(f, v) == s.fold_left(v, |b:B, a:A|f(a, b)),
-    decreases s.len()
-{
-    let g = |b:B, a:A|f(a, b);
-    if s.len() == 0 {}
-    else {
-        let last = s.last();
-        let s0 = s.drop_last();
-        assert(s.reverse() =~= seq![last] + s0.reverse());
-
-        let res1 = s.reverse().fold_right(f, v);
-        let res2 = s.fold_left(v, g);
-        assert(
-            res1 == s.reverse().fold_right_alt(f, v)
-        ) by {
-            s.reverse().lemma_fold_right_alt(f, v)
-        }
-
-        assert(
-            res2 == g(s0.fold_left(v, g), last)
-        );
-
-        assert(s.reverse().first() == last);
-        assert(s.reverse().subrange(1, s.reverse().len() as int) =~= s0.reverse());
-        assert(
-            res1 == f(last, s0.reverse().fold_right_alt(f, v))
-        );
-        assert(
-            res1 ==  f(last, s0.reverse().fold_right(f, v))
-        ) by {
-            s0.reverse().lemma_fold_right_alt(f, v)
-        }
-
-        assert(
-            res2 == g(s0.fold_left(v, g), last)
-        );
-        lemma_fold_reverse1(s0, v, f);
-    }
-}
-
-
-
-proof fn lemma_fold_reverse<A, B>(s:Seq<A>, v:B,  f:spec_fn(B, A) -> B)
-    ensures
-        s.fold_left(v, f) == s.reverse().fold_right(|a:A, b:B|f(b, a), v),
-    decreases s.len()
-{
-    let g = |a:A, b:B|f(b, a);
-    if s.len() == 0 {}
-    else {
-        let last = s.last();
-        let s0 = s.drop_last();
-        assert(s.reverse() =~= seq![last] + s0.reverse());
-
-        let res1 = s.fold_left(v, f);
-        let res2 = s.reverse().fold_right(g, v);
-        assert(
-            res2 == s.reverse().fold_right_alt(g, v)
-        ) by {
-            s.reverse().lemma_fold_right_alt(g, v)
-        }
-
-        assert(
-            res1 == f(s0.fold_left(v, f), last)
-        );
-
-        assert(s.reverse().first() == last);
-        assert(s.reverse().subrange(1, s.reverse().len() as int) =~= s0.reverse());
-        assert(
-            res2 == g(last, s0.reverse().fold_right_alt(g, v))
-        );
-        assert(
-            res2 ==  g(last, s0.reverse().fold_right(g, v))
-        ) by {
-            s0.reverse().lemma_fold_right_alt(g, v)
-        }
-
-        assert(
-            res2 == f(s0.reverse().fold_right(g, v), last)
-        );
-        lemma_fold_reverse(s0, v, f);
-    }
-}
-
-
-
-
-
-pub open spec fn commutative_foldl<A, B>(f: spec_fn(B, A) -> B) -> bool {
-    forall|x: A, y: A, v: B| #[trigger] f(f(v, x), y) == f(f(v, y), x)
-}
-
-
-
-proof fn lemma_reverse_to_multiset<A>(s:Seq<A>)
-  ensures s.reverse().to_multiset() =~= s.to_multiset()
-  decreases s.len(),
-{
-    broadcast use vstd::seq_lib::group_seq_properties;
-
-    if s.len() == 0 {}
-    else {
-        let s2 = s.drop_first();
-        let e = s.first();
-        assert(s =~= seq![e] + s2);
-        assert(s.to_multiset() =~= seq![e].to_multiset().add(s2.to_multiset())) by{
-            vstd::seq_lib::lemma_multiset_commutative(seq![e], s2)
-        }
-        assert(s.reverse() =~= s2.reverse().push(e));
-        assert(s.reverse().to_multiset() =~= s2.reverse().to_multiset().insert(e));
-        lemma_reverse_to_multiset(s2);
-    }
-}
-
-
-
 pub proof fn lemma_remove_value_commut<T>(x:Seq<T>, y:T, z:T)
     ensures
         x.remove_value(y).remove_value(z)
@@ -259,19 +140,6 @@ pub proof fn lemma_fold_right_preserves_inv<A, B>
 }
 
 
-// For a commutative fold_right operator, any folding order
-// (i.e., any permutation) produces the same result.
-pub proof fn lemma_fold_left_permutation<A, B>(l1: Seq<A>, l2: Seq<A>, f: spec_fn(B, A) -> B, v: B)
-    requires
-        commutative_foldl(f),
-        l1.to_multiset() == l2.to_multiset(),
-    ensures
-        l1.fold_left(v, f) == l2.fold_left(v, f),
-{
-    lemma_fold_left_permutation_with_inv(l1, l2, f, v, |b:B|true)
-}
-
-
 
 pub proof fn lemma_fold_right_commute_one_with_inv<A, B>
     (s:Seq<A>, a: A, f: spec_fn(A, B) -> B, v: B, inv:spec_fn(B)->bool)
@@ -370,17 +238,18 @@ pub proof fn lemma_fold_left_permutation_with_inv<A, B>
 {
 
     let g = |a:A, b:B| f(b, a);
+    assert((|b:B, a:A| g(a, b)) =~= f);
 
     assert(l1.fold_left(v, f) == l1.reverse().fold_right(g, v)) by {
-        lemma_fold_reverse(l1, v, f)
+        l1.lemma_reverse_fold_right(v, g)
     };
     assert(l2.fold_left(v, f) == l2.reverse().fold_right(g, v)) by{
-        lemma_fold_reverse(l2, v, f)
+        l2.lemma_reverse_fold_right(v, g)
     };
 
     assert(l1.reverse().to_multiset() =~= l2.reverse().to_multiset()) by{
-        lemma_reverse_to_multiset(l1);
-        lemma_reverse_to_multiset(l2);
+        l1.lemma_reverse_to_multiset();
+        l2.lemma_reverse_to_multiset();
     }
 
     assert(forall |x:A| #[trigger] l1.reverse().contains(x) ==> l1.contains(x));
@@ -390,8 +259,5 @@ pub proof fn lemma_fold_left_permutation_with_inv<A, B>
         inv,
     );
 }
-
-
-
 
 }

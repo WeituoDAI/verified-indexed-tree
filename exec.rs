@@ -26,6 +26,8 @@ impl<T> IndexTree<T>{
         }).unwrap()
     }
 
+    // see Verus issue https://github.com/verus-lang/verus/issues/1832
+    // it is not totally fixed, I have to disable the loop_isolation
     #[verifier::loop_isolation(false)]
     pub fn revoke(&mut self, id:usize)
         requires
@@ -200,5 +202,3 @@ impl<T> IndexTree<T>{
 
 
 }//verus!
-
-

@@ -3,25 +3,9 @@ use vstd::prelude::*;
 verus!{
 
 
-
-pub broadcast proof fn lemma_set_to_seq_len<A>(s:Set<A>)
+pub proof fn lemma_set_to_seq_no_duplicates<A>(s:Set<A>)
 	requires s.finite()
-	ensures #[trigger]s.to_seq().len() == s.len()
-  decreases s.len()
-{
-  if s.len() == 0 {}
-  else {
-    let x = choose |x:A| #[trigger] s.contains(x) 
-      && s.to_seq() =~= seq![x] + s.remove(x).to_seq();
-    assert(s.remove(x).to_seq().len() == s.remove(x).len()) by {
-      lemma_set_to_seq_len(s.remove(x))
-    }
-  }
-}
-
-pub broadcast proof fn lemma_set_to_seq_no_duplicates<A>(s:Set<A>)
-	requires s.finite()
-	ensures #[trigger] s.to_seq().no_duplicates()
+	ensures s.to_seq().no_duplicates()
   decreases s.len()
 {
   if s.len() == 0 {}
@@ -38,56 +22,10 @@ pub broadcast proof fn lemma_set_to_seq_no_duplicates<A>(s:Set<A>)
   }
 }
 
-pub proof fn lemma_seq_to_set_drop<A>(s:Seq<A>)
-  requires
-    s.len() > 0,
-    s.no_duplicates(),
-  ensures
-    s.to_set() =~= s.drop_last().to_set().insert(s.last())
-{
-  assert forall |a:A| #[trigger]s.to_set().contains(a) implies 
-    s.drop_last().to_set().contains(a) || a == s.last() by
-  {
-    let i = choose |i:int| s[i] == a && 0 <= i < s.len();
-    if i == s.len() - 1 {}
-    else { assert(s.drop_last()[i] == a) }
-  }
-}
-
-
-
-pub broadcast proof fn lemma_set_to_seq_contains<T>(s:Set<T>, v:T)
+proof fn lemma_set_to_seq_contains_2<T>(s:Set<T>, v:T)
 	requires
     s.finite(),
-    s.contains(v),
-	ensures
-		#[trigger] s.to_seq().contains(v)
-	decreases
-		s.len()
-{
-	if s.len() == 0{}
-	else {
-    let v0 = choose |x:T| (#[trigger]s.contains(x) &&
-        s.to_seq() =~=  Seq::<T>::empty().push(x) + s.remove(x).to_seq());
-    if v0 == v {
-      assert(s.to_seq()[0] == v0)
-    }
-    else {
-      assert(s.remove(v0).to_seq().contains(v)) by{
-        lemma_set_to_seq_contains(s.remove(v0), v);
-      }
-      let i0 = choose |i:int| 
-        (s.remove(v0).to_seq()[i] == v && 0 <= i < s.remove(v0).to_seq().len());
-      assert(s.to_seq()[1 + i0] == v);
-    }						
-	}	
-}
-
-
-pub broadcast proof fn lemma_set_to_seq_contains_2<T>(s:Set<T>, v:T)
-	requires
-    s.finite(),
-    #[trigger]s.to_seq().contains(v),
+    s.to_seq().contains(v),
 	ensures
 		s.contains(v)
 	decreases
@@ -108,27 +46,6 @@ pub broadcast proof fn lemma_set_to_seq_contains_2<T>(s:Set<T>, v:T)
     }
 	}
 }
-
-
-pub proof fn lemma_set_map_finite<A, B>(s:Set<A>, f:spec_fn(A) -> B)
-    requires s.finite()
-    ensures s.map(f).finite(), s.map(f).len() <= s.len(),
-    decreases s.len()
-{
-    let s2 = s.map(f);
-    if s.len() == 0 {
-        assert(s.is_empty());
-        assert(s2.is_empty());
-    }
-    else {
-        let x = s.choose();
-        let s0 = s.remove(x);
-        assert(s0.len() < s.len());
-        assert(s2 =~= s0.map(f).insert(f(x)));
-        lemma_set_map_finite(s0, f);
-    }
-}
-
 
 pub proof fn lemma_no_duplicates_seq_to_set_to_multiset<A>(s1:Seq<A>, s2:Seq<A>)
   requires

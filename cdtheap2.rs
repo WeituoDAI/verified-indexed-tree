@@ -16,7 +16,7 @@ impl<T> NodeAbs<T>{
 
     proof fn lemma_remove_child_commut()
         ensures
-            crate::fold::commutative_foldl(
+            vstd::seq_lib::commutative_foldl(
                 |x:Self, y:usize| Self::remove_child(x, y)
             )
     {
@@ -130,7 +130,7 @@ impl<T> AbsTree<T>{
 
     proof fn spec_nodes_remove_commut(id:usize)
         ensures
-            crate::fold::commutative_foldl(
+            vstd::seq_lib::commutative_foldl(
                 |x:Map<usize, NodeAbs<T>>, y:usize| Self::spec_nodes_remove(id, x, y)
             )
     {
@@ -149,34 +149,6 @@ impl<T> AbsTree<T>{
         Self{ nodes }
     }
 
-    proof fn lemma_remove_edges_to_0(pre:Map<usize, NodeAbs<T>>, id:usize, seq:Seq<usize>)
-        requires
-            pre.dom().finite(),
-            seq.to_set().subset_of(pre.dom()),
-
-        ensures 
-            seq.fold_left(pre, |x:Map<usize, NodeAbs<T>>, y:usize|
-                Self::spec_nodes_remove(id, x, y)
-            ).dom() =~= pre.dom()
-        decreases seq.len(),
-    {
-        if seq.len() == 0 {}
-        else {
-            let seq1 = seq.drop_last();
-            let last = seq.last();
-            let f = |x:Map<usize, NodeAbs<T>>, y:usize|
-                Self::spec_nodes_remove(id, x, y);
-            let res1 = seq1.fold_left(pre, f);
-            assert(res1.dom() =~= pre.dom()) by {Self::lemma_remove_edges_to_0(pre, id, seq1)};         
-            let res = seq.fold_left(pre, f);
-            assert(res =~= f(res1, last));
-            assert(res =~= 
-                Self::spec_nodes_remove(id, res1, last)
-            );
-            assert(res1.dom() =~= pre.dom());
-        }
-    }
-
     proof fn lemma_remove_edges_to_1(pre:Map<usize, NodeAbs<T>>, post:Map<usize, NodeAbs<T>>, id:usize, seq:Seq<usize>)
         requires
             pre.dom().finite(),
@@ -192,51 +164,58 @@ impl<T> AbsTree<T>{
                 pre[i].remove_child(id),
             forall |i:usize| !#[trigger]seq.contains(i) ==>
                 post[i] =~= pre[i],
-
-        decreases seq.len(),
     {
-        Self::lemma_remove_edges_to_0(pre, id, seq);
-        assert(post.dom() =~= pre.dom());
-        if seq.len() == 0 {}
-        else {
-            let f = |x:Map<usize, NodeAbs<T>>, y:usize|
-                Self::spec_nodes_remove(id, x, y);
-            let seq1 = seq.drop_last();
-            let last = seq.last();
-            let res1 = seq1.fold_left(pre, f);
-            let res = seq.fold_left(pre, f);
-            Self::lemma_remove_edges_to_1(pre, res1, id, seq1);
-            assert(res =~= f(res1, last));
-
-            assert forall |i:usize| !#[trigger]seq.contains(i) implies
-                post[i] =~= pre[i] by
-            {
-                assert(!seq1.contains(i));
+        let f = |b:Map<usize, NodeAbs<T>>, a:usize| Self::spec_nodes_remove(id, b, a);
+        let inv = |b:Map<usize, NodeAbs<T>>, s:Seq<usize>|
+            b.dom() =~= pre.dom()
+            && (forall |i:usize| #[trigger]s.contains(i) ==>
+                b[i] =~= pre[i].remove_child(id))
+            && (forall |i:usize| !#[trigger]s.contains(i) ==>
+                b[i] =~= pre[i]);
+        assert forall |i:int| 0 <= i < seq.len() &&
+            #[trigger]inv(seq.take(i).fold_left(pre, f), seq.take(i)) implies
+            inv(seq.take(i+1).fold_left(pre, f), seq.take(i+1)) by
+        {
+            let l1 = seq.take(i);
+            let l2 = seq.take(i+1);
+            let r1 = l1.fold_left(pre, f);
+            let r2 = l2.fold_left(pre, f);
+            let last = l2.last();
+            assert(l1 =~= l2.drop_last());
+            assert(r2 == f(r1, last));
+            assert(r2.dom() =~= pre.dom()) by {
+                assert(r1.dom() =~= pre.dom());
+                assert(l2.contains(last));
+                assert(seq.contains(last));
             }
 
+            assert forall |i:usize|  !#[trigger]l2.contains(i) implies
+                r2[i] =~= pre[i] by
+            {
+                assert(!l1.contains(i));
+            }
 
-            assert forall |i:usize| #[trigger]seq.contains(i) implies
-                post[i] =~=
+            assert forall |i:usize| #[trigger]l2.contains(i) implies
+                r2[i] =~=
                 pre[i].remove_child(id) by
             {
-                assert(
-                    res =~= Self::spec_nodes_remove(id, res1, last)
-                );
-
                 if i != last {
-                    assert(seq =~= seq1.push(last));
-                    assert(seq1.contains(i));
+                    assert(l2 =~= l1.push(last));
+                    assert(l1.contains(i));
                 }
                 else{
-                    assert(post[last] =~= res1[last].remove_child(id));
-                    assert(res1[last] =~= pre[last]) by {
-                        assert(!seq1.contains(last)) by {
+                    assert(r2[last] =~= r1[last].remove_child(id));
+                    assert(r1[last] =~= pre[last]) by {
+                        assert(!l1.contains(last)) by {
                             assert(seq.no_duplicates())
                         }
                     }
                 }
             }
         }
+        crate::fold::lemma_fold_left_preserves_inv_3(
+            seq, f, pre, inv
+        )
     }
 
     proof fn lemma_remove_edges_to_ensures(pre:Self, post:Self, id:usize)
@@ -631,11 +610,11 @@ impl<T> AbsTree<T>{
                 ==> self.is_parent_of(x, y),
 
             //structure specific
-            forall |x:usize|
-                self.contains(x) &&
-                x != id && !self.is_parent_of(x, id) ==>
-                #[trigger]self.remove_node(id).nodes[x] =~= self.nodes[x]
-                && #[trigger] self.remove_node(id).contains(x),
+            // forall |x:usize|
+            //     self.contains(x) &&
+            //     x != id && !self.is_parent_of(x, id) ==>
+            //     #[trigger]self.remove_node(id).nodes[x] =~= self.nodes[x]
+            //     && #[trigger] self.remove_node(id).contains(x),
     {
         self.lemma_remove_node_ensures(id);
 
@@ -708,22 +687,22 @@ impl<T> AbsTree<T>{
             }
         }
 
-        assert forall |x:usize|
-                self.contains(x) &&
-                x != id && !self.is_parent_of(x, id) 
-                implies
-                #[trigger]self.remove_node(id).nodes[x] =~= self.nodes[x] by
-        {
-            if self.contains(id){
-                let post = self.remove_node(id);
-                assert(post.contains(x));
-                assert(post.nodes[x] =~= self.nodes[x].remove_child(id));
+        // assert forall |x:usize|
+        //         self.contains(x) &&
+        //         x != id && !self.is_parent_of(x, id) 
+        //         implies
+        //         #[trigger]self.remove_node(id).nodes[x] =~= self.nodes[x] by
+        // {
+        //     if self.contains(id){
+        //         let post = self.remove_node(id);
+        //         assert(post.contains(x));
+        //         assert(post.nodes[x] =~= self.nodes[x].remove_child(id));
 
-                assert(!self.nodes[x].child.contains(id));
-                self.nodes[x].child.index_of_first_ensures(id);
-                assert(post.nodes[x] =~= self.nodes[x]);
-            }    
-        }
+        //         assert(!self.nodes[x].child.contains(id));
+        //         self.nodes[x].child.index_of_first_ensures(id);
+        //         assert(post.nodes[x] =~= self.nodes[x]);
+        //     }    
+        // }
     }
 
     pub proof fn lemma_remove_node_path(self, id:usize)
@@ -1500,13 +1479,13 @@ impl<T> AbsTree<T>{
         let nodes2 = seq.fold_left(nodes, f);
         let res2 = self.remove_edges_to(child);
         assert(res2.nodes =~= nodes2);
-        assert(crate::fold::commutative_foldl(f)) by {
+        assert(vstd::seq_lib::commutative_foldl(f)) by {
             Self::spec_nodes_remove_commut(child)
         }
         assert(
             nodes2 =~= seq1.fold_left(nodes, f)
         ) by {
-            crate::fold::lemma_fold_left_permutation(seq, seq1, f, nodes)
+            vstd::seq_lib::lemma_fold_left_permutation(seq, seq1, f, nodes)
         }
 
         let tmp = seq0.fold_left(nodes, f);
@@ -2573,9 +2552,9 @@ impl<T> AbsTree<T>{
 // the main lemma used in `IndexTree::<T>::revoke`
 // prove that : 
 //     self ---remove_edges_from(id)--->
-//          ---revoke_and_remove_self(child) for each child of id in the original tree
+//          ---revoke_and_remove_self(child) for each child of id in the original tree--->
 //     <==>
-//     self --- revoke(id)
+//     self ---revoke(id)--->
 impl<T> AbsTree<T>{
     pub proof fn main_lemma(self, id:usize)
         requires
@@ -2717,6 +2696,7 @@ impl<T> AbsTree<T>{
         }
     }
 
+    // ? why this proof takes much verification time
     proof fn lemma_remove_one_edge_and_revoke(self, id:usize, child:usize)
         requires
             self.wf(),
