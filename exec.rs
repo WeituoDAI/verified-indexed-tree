@@ -10,6 +10,7 @@ broadcast use vstd::std_specs::hash::group_hash_axioms;
 
 //efficient implementation
 impl<T> IndexTree<T>{
+    // &mut not supported currently
     #[verifier::external_body]
     pub fn take_children(&mut self, id: usize) -> (res:Vec<usize>)
         requires old(self).nodes@.contains_key(id)
@@ -26,9 +27,7 @@ impl<T> IndexTree<T>{
         }).unwrap()
     }
 
-    // see Verus issue https://github.com/verus-lang/verus/issues/1832
-    // it is not totally fixed, I have to disable the loop_isolation
-    #[verifier::loop_isolation(false)]
+
     pub fn revoke(&mut self, id:usize)
         requires
             old(self)@.wf(),

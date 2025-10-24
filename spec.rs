@@ -547,6 +547,16 @@ impl<T> AbsTree<T>{
 
 // lemmas for descendants
 impl<T> AbsTree<T>{
+    pub proof fn lemma_childs(self, id:usize)
+        requires self.wf()
+        ensures self.childs(id).subset_of(self.descendants(id))
+    {
+        assert forall |x:usize| #[trigger]self.is_parent_of(id, x) implies self.has_path(id, x) by{
+            self.lemma_parent_to_path(id, x)
+        }
+    }
+
+
     pub proof fn lemma_descendants(self, id:usize)
         requires self.wf()
         ensures self.descendants(id).subset_of(self.dom())
@@ -3263,5 +3273,194 @@ impl<T> AbsTree<T>{
         self.revoke(id).lemma_remove_node_measure(id);
     }
 }
+
+
+
+impl<T> AbsTree<T>{
+
+    pub open spec fn revoke_alt(self, id:usize) -> Self
+        recommends self.wf(), self.nodes.contains_key(id),
+    {
+        let nodes = self.nodes;
+        let descendants = self.descendants(id);
+        let f = |b:Map<usize, NodeAbs<T>>, a:usize| b.remove(a);
+        let node = self.nodes[id];
+        let new_node = NodeAbs { id : node.id, child : seq![], val : node.val};
+
+        Self{
+            nodes : 
+                descendants.to_seq().fold_left(nodes, f).insert(
+                    id, 
+                    new_node
+                )
+        }
+    }
+
+    // proof fn lemma_revoke_alt(self, id:usize)
+    //     requires
+    //         self.wf(),
+    //         self.nodes.contains_key(id),
+    //     ensures
+    //         self.revoke(id) =~= self.revoke_alt(id),
+    // {
+    //     admit()
+    // }
+
+    pub open spec fn has_free_node(self, id:usize) -> bool{
+        &&& self.contains(id)
+        &&& self.nodes[id].child.len() == 0
+    }
+
+    proof fn lemma_has_free_node(self, id:usize)
+        requires
+            self.wf(),
+            self.contains(id),
+        ensures
+            self.has_free_node(id) <==> self.childs(id).len() == 0,
+            self.has_free_node(id) <==> self.descendants(id).len() == 0,
+    {
+        assert(self.descendants(id).finite()) by {
+            self.lemma_descendants(id)
+        }
+        assert(self.childs(id).finite()) by {
+            self.lemma_childs(id)
+        }
+
+        assert(self.childs(id).is_empty() <==> self.childs(id).len() == 0);
+        assert(self.descendants(id).is_empty() <==> self.descendants(id).len() == 0);
+
+        if self.descendants(id).is_empty(){
+            assert(self.childs(id).is_empty()) by {
+                if !self.childs(id).is_empty() {
+                    let j = self.childs(id).choose();
+                    assert(self.is_parent_of(id, j));
+                    assert(self.has_path(id, j)) by {
+                        self.lemma_parent_to_path(id, j)
+                    }
+                    assert(self.descendants(id).contains(j));
+                }
+            }
+        }
+
+        if self.childs(id).is_empty() {
+            if self.nodes[id].child.len() > 0{
+                let j = self.nodes[id].child.last();
+                assert(self.is_parent_of(id, j));
+                assert(self.childs(id).contains(j));
+                assert(false);
+            }
+        }
+    }
+
+    // we can make this more general (not limited to self.descendants(id))
+    proof fn lemma_exists_free_node(self, id:usize)
+        requires
+            self.wf(),
+            !self.descendants(id).is_empty(),
+        ensures
+            exists |k:usize|
+                self.has_path(id, k) && #[trigger]self.has_free_node(k)
+    {
+        let des = self.descendants(id);
+        self.lemma_descendants(id);
+        assert(des.finite());
+        assert(des.len() > 0);
+
+        let f = |i:usize| self.descendants(i).len();
+        let set_des_len = des.map(f);
+
+        assert(set_des_len.finite()) by {
+            des.lemma_map_finite(f)
+        }
+        assert(set_des_len.len() > 0) by {
+            let e = des.choose();
+            assert(set_des_len.contains(f(e)));
+        }
+
+        let leq = |a:nat, b:nat| a <= b;
+
+        let min_des = set_des_len.find_unique_minimal(leq);
+
+        set_des_len.find_unique_minimal_ensures(leq);
+        assert(set_des_len.contains(min_des));
+        let k = choose |k:usize| des.contains(k) && f(k) == min_des;
+        assert(des.contains(k));
+        assert(self.descendants(k).len() == min_des);
+        assert forall |n:nat|
+            set_des_len.contains(n) implies leq(min_des, n)
+        by {
+            if !leq(min_des, n)
+            {
+                assert(leq(n, min_des));
+                assert(n == min_des);
+            }
+        }
+
+        if min_des == 0 {
+            assert(self.has_path(id, k));
+            assert(self.has_free_node(k)) by {
+                self.lemma_has_free_node(k)
+            }
+        }
+        else {
+            if(!exists |k:usize|
+                self.has_path(id, k) && #[trigger]self.has_free_node(k))
+            {
+                assert(
+                    forall |k:usize|
+                        self.has_path(id, k) ==> !#[trigger] self.has_free_node(k)
+                );
+
+                assert(self.has_path(id, k));
+                assert(!self.has_free_node(k));
+                assert(self.descendants(k).len() > 0) by{
+                    self.lemma_has_free_node(k)
+                }
+                let h = self.descendants(k).choose();
+                assert(self.descendants(k).contains(h));
+                assert(self.has_path(k, h));
+                assert(self.has_path(id, h)) by {
+                    self.lemma_path_trans(id, k, h)
+                }
+                assert(des.contains(h));
+                assert(set_des_len.contains(f(h)));
+                assert(f(h) >= min_des);
+                assert(self.descendants(h).len() >= min_des);
+
+                let s1 = self.descendants(k);
+                let s2 = self.descendants(h);
+                assert(!s2.contains(h));
+                assert(s1.contains(h));
+                assert(s2.subset_of(s1)) by {
+                    assert forall |j:usize|
+                        s2.contains(j) implies s1.contains(j)
+                    by {
+                        self.lemma_path_trans(k, h, j)
+                    }
+                }
+                assert(s1.finite()) by { self.lemma_descendants(k) }
+                assert(s2.finite()) by { self.lemma_descendants(h) }
+                assert(s2.insert(h).subset_of(s1));
+                assert(s2.insert(h).len() <= s1.len()) by{
+                    vstd::set_lib::lemma_len_subset(s2.insert(h), s1)
+                }
+                assert(s2.insert(h).len() == s2.len() + 1);
+                assert(f(k) > f(h));
+                assert(false);
+            }
+        }
+    }
+
+
+    
+
+
+
+
+}
+
+
+
+
 
 }//verus!
