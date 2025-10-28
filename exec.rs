@@ -129,7 +129,7 @@ impl<T> IndexTree<T>{
             self.nodes.remove(&child);
             proof{
                 assert(self@ =~= t1@.remove_node(child)) by {
-                    t1@.lemma_remove_free_node(child)
+                    t1@.lemma_remove_free_node0(child)
                 }
                 assert(
                     children@.subrange(0, i + 1).drop_last()
