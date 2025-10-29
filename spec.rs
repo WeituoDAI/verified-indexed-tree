@@ -1,5 +1,4 @@
 use vstd::prelude::*;
-// use std::collections::HashMap;
 use crate::types::*;
 
 verus!{
@@ -485,7 +484,8 @@ impl<T> AbsTree<T>{
         requires
             self.is_parent_of(x, y),
         ensures
-            #[trigger]self.has_path(x, y)
+            #[trigger]self.has_path(x, y),
+            self.has_path_i(x, y, 1),
     {
         assert(self.has_path_i(x, y, 1))
     }
@@ -756,6 +756,7 @@ impl<T> AbsTree<T>{
             !self.has_path(id, y),
             self.has_path_i(x, y, i)
         ensures
+            self.remove_node(id).has_path_i(x, y, i),
             self.remove_node(id).has_path(x, y),
         decreases i
     {
@@ -773,13 +774,9 @@ impl<T> AbsTree<T>{
             assert(post.is_parent_of(x, z)) by {
                 self.lemma_remove_node_path0(id);
             }
-            assert(post.has_path(z, y)) by {
+            assert(post.has_path(z, y) && post.has_path_i(z, y, i-1)) by {
                 self.lemma_remove_node_path_i_1(id, z, y, i-1)
             }
-            assert(post.has_path(x, z)) by {
-                post.lemma_parent_to_path(x, z)
-            }
-            post.lemma_path_trans(x, z, y)
         }
     }
 
@@ -3168,7 +3165,7 @@ impl<T> AbsTree<T>{
     }
 
 
-    // prove that tree operations defined above will decrease the measure
+    // prove that tree operations defined above will decreases the measure
 
     pub proof fn lemma_remove_one_edge_measure(self, parent:usize, child:usize)
         requires
@@ -3294,6 +3291,39 @@ impl<T> AbsTree<T>{
                     id, 
                     new_node
                 )
+        }
+    }
+
+    pub proof fn revoke_alt_ensures(self, id:usize)
+        requires
+            self.wf(),
+            self.contains(id),
+        ensures
+            forall |x:usize|
+                self.contains(x) &&
+                !#[trigger]self.descendants(id).contains(x)
+                && x != id
+                ==> self.revoke_alt(id).nodes[x] == self.nodes[x]
+    {
+        assert forall |x:usize|
+                self.contains(x) &&
+                !#[trigger]self.descendants(id).contains(x)
+                && x != id
+                implies self.revoke_alt(id).nodes[x] == self.nodes[x]
+        by {
+            let des_seq = self.descendants(id).to_seq();
+            self.lemma_descendants(id);
+            assert(!des_seq.contains(x)) by {
+                self.descendants(id).lemma_to_seq_to_set_id()
+            }
+            let f = |b:Map<usize, NodeAbs<T>>, a:usize| b.remove(a);
+            let inv = |b:Map<usize, NodeAbs<T>>| b.contains_key(x) && b[x] == self.nodes[x] && b.dom().finite();
+            crate::fold::lemma_fold_left_preserves_inv(
+                des_seq,
+                f,
+                self.nodes,
+                inv
+            )
         }
     }
 
@@ -3757,10 +3787,205 @@ impl<T> AbsTree<T>{
         }
     }
 
+    proof fn lemma_remove_free_node_has_path_i(self, id:usize, k:usize, x:usize, i:int)
+        requires
+            self.contains(id),
+            self.descendants(id).contains(k),
+            self.has_free_node(k),
+            self.wf(),
+            x != k,
+            self.has_path_i(id, x, i),
+        ensures
+            self.remove_node(k).has_path_i(id, x, i),
+        decreases i,
+    {
+        assert(!self.has_path(k, x)) by {
+            if self.has_path(k, x) {
+                assert(false);
+            }
+        }
+        self.lemma_remove_node_path_i_1(k, id, x, i)
+    }
+
 }
 
 
+// About height
+impl<T> AbsTree<T>{ 
+    pub closed spec fn height(self, id:usize) -> nat{
+        let f = |i:int|
+            exists|x:usize| self.contains(x) && self.has_path_i(id, x, i);
+        let s = Set::new(f);
+        if s.len() == 0 { 0nat }
+        else { s.find_unique_maximal(|a:int, b:int| a <= b) as nat }
+    }
 
+    proof fn lemma_has_path_i_unique(self, x:usize, y:usize, i:int, j:int)
+        requires
+            self.wf(),
+            self.has_path_i(x, y, i),
+            self.has_path_i(x, y, j),
+        ensures
+            i == j
+        decreases
+            i,
+    {
+        if i <= 0 {}
+        else if i == 1 {
+            assert(self.is_parent_of(x, y));
+            if j != 1 {
+                self.lemma_has_path_i_ensures(x, y, j);
+                let z = choose |z:usize| self.has_path_i(x, z, j-1) && self.is_parent_of(z, y);
+                assert(self.is_parent_of(z, y));
+                assert(x == z);
+                assert(self.has_path(x, x));
+                assert(false)
+            }
+        }
+        else if j <= 1 { self.lemma_has_path_i_unique(x, y, j, i) }
+        else {
+            self.lemma_has_path_i_ensures(x, y, i);
+            let z1 = choose |z:usize| self.has_path_i(x, z, i-1) && self.is_parent_of(z, y);
+            assert(self.has_path_i(x, z1, i-1));
+            assert(self.is_parent_of(z1, y));
+
+            self.lemma_has_path_i_ensures(x, y, j);
+            let z2 = choose |z:usize| self.has_path_i(x, z, j-1) && self.is_parent_of(z, y);
+            assert(self.has_path_i(x, z2, j-1));
+            assert(self.is_parent_of(z2, y));
+
+            assert(z1 == z2);
+            assert(i-1 == j-1) by { self.lemma_has_path_i_unique(x, z2, i-1, j-1)}
+        }
+    }
+
+    pub proof fn lemma_height_finite(self, id:usize)
+        requires
+            self.wf(),
+            self.contains(id),
+        ensures
+            Set::new(|i:int|
+                exists|x:usize| self.contains(x) && self.has_path_i(id, x, i as int)
+            ).finite(),
+        decreases
+            self.dom().len(),
+    {
+        let set =  Set::new(|i:int|
+            exists|x:usize| self.contains(x) && self.has_path_i(id, x, i as int)
+        );
+        let des = self.descendants(id);
+
+        if des.is_empty() {
+            assert(set.is_empty()) by {
+                if !set.is_empty() {
+                    let i = set.choose();
+                    assert(set.contains(i));
+                    let x = choose |x:usize| self.contains(x) && self.has_path_i(id, x, i as int);
+                    assert(self.has_path(id, x));
+                    assert(des.contains(x));
+                }
+            }
+        }
+        else {
+            self.lemma_exists_free_node(id);
+            let k = choose |k:usize|
+                self.has_path(id, k) && #[trigger]self.has_free_node(k);
+            assert(self.has_free_node(k));
+
+            assert(self.contains(k));
+            assert(self.has_path(id, k));
+            assert(id != k);
+
+            let s2 = self.remove_node(k);
+            assert(s2.wf()) by { self.lemma_remove_node_wf(k) }
+            assert(s2.dom() == self.dom().remove(k)) by { self.lemma_remove_node_ensures(k) }
+            let set2 =  Set::new(|i:int|
+                exists|x:usize| s2.contains(x) && s2.has_path_i(id, x, i as int)
+            );
+            assert(set2.finite()) by { s2.lemma_height_finite(id) }
+
+            let i0 = choose |i:int| self.has_path_i(id, k, i);
+            assert(self.has_path_i(id, k, i0));
+
+            assert(set.subset_of(set2.insert(i0))) by {
+                assert forall |i:int| set.contains(i) implies
+                    set2.contains(i) || i == i0 by
+                {
+                    let x = choose |x:usize| self.contains(x) && self.has_path_i(id, x, i as int);
+                    assert(self.has_path_i(id, x, i));
+                    if x == k {
+                        assert(self.has_path_i(id, x, i));
+                        assert(i == i0) by {
+                            self.lemma_has_path_i_unique(id, x, i, i0)
+                        }
+                    }
+                    else {
+                        assert(s2.has_path_i(id, x, i)) by {
+                            self.lemma_remove_free_node_has_path_i(id, k, x, i)
+                        }
+                    }
+                }
+            }
+
+        }
+    }
+
+    pub proof fn lemma_height(self, x:usize, y:usize)
+        requires
+            self.wf(),
+            self.contains(x),
+            self.contains(y),
+            self.is_parent_of(x, y),
+        ensures
+            self.height(x) > self.height(y),
+            // self.has_path(x, y) ==> self.height(x) > self.height(y)
+    {
+        let f2 = |i:int|
+            exists|a:usize| self.contains(a) && self.has_path_i(y, a, i as int);
+        let s2 = Set::new(f2);
+
+        let f1 = |i:int|
+            exists|a:usize| self.contains(a) && self.has_path_i(x, a, i as int);
+        let s1 = Set::new(f1);
+        let leq = |a:int, b:int| a <= b;
+
+        self.lemma_height_finite(x);
+        self.lemma_height_finite(y);
+        let max_1 = s1.find_unique_maximal(leq);
+        let max_2 = s2.find_unique_maximal(leq);
+
+        assert(self.has_path_i(x, y, 1)) by {
+            self.lemma_parent_to_path(x, y)
+        }
+
+        if s2.len() == 0 {
+            assert(s1.contains(1));
+            assert(max_1 >= 1) by {
+                s1.find_unique_maximal_ensures(leq);
+                if !leq(1, max_1) { assert(leq(max_1, 1)) }
+            }
+        }
+        else {
+
+            assert forall |i:int| s2.contains(i) implies s1.contains(i + 1) by {
+                let a = choose |a:usize| self.contains(a) && self.has_path_i(y, a, i as int);
+                assert(self.has_path_i(y, a, i as int));
+                assert(self.has_path_i(x, a, i + 1)) by {
+                    self.lemma_has_path_i_trans(x, y, a, 1, i as int)
+                }
+            }
+
+            s2.find_unique_maximal_ensures(leq);
+            assert(s2.contains(max_2));
+            assert(s1.contains(max_2 + 1));
+
+            assert(max_2 + 1 <= max_1) by {
+                s1.find_unique_maximal_ensures(leq);
+                if !leq(max_2 + 1, max_1) { assert(leq(max_1, max_2 + 1))}
+            }
+        }
+    }
+}
 
 
 }//verus!
