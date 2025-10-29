@@ -7,8 +7,9 @@ In this project, we define indexed tree data structure, and make the formal veri
 
 This project contains:
 
-- `types.rs` defines the data structure.
+- `types.rs` defines the tree data structure (the exec tree, and the map-based model).
 - `spec.rs` proves the correctness of the tree operation.
+- `tree_spec.rs` defines the tree model, prove the correspondence between the tree model and the map-based model.
 - `exec.rs` defines the executable function `revoke`.
 - `set.rs` `fold.rs` contain general lemmas used in the proof.
 
